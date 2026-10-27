@@ -1700,17 +1700,33 @@ public class MainActivity extends Activity implements Hub.Callback {
     // ------------------------------------------------------ Wi-Fi Direct
 
     private void discover() {
+        discover(0);
+    }
+
+    private void discover(final int attempt) {
         if (p2p == null || !ensurePermissions()) return;
         setStatus("Mencari perangkat di sekitar", AMBER);
         p2p.discoverPeers(channel, new WifiP2pManager.ActionListener() {
             @Override public void onSuccess() { }
             @Override public void onFailure(int reason) {
-                setStatus("Pencarian gagal (kode " + reason + "). Cek Wi‑Fi dan Lokasi", DANGER);
+                if (reason == WifiP2pManager.BUSY && attempt < 2) {
+                    // Usually a scan or invitation still running; clear it and try again.
+                    p2p.stopPeerDiscovery(channel, null);
+                    ui.postDelayed(new Runnable() {
+                        @Override public void run() { discover(attempt + 1); }
+                    }, 1500);
+                    return;
+                }
+                setStatus("Pencarian gagal: " + p2pReason(reason), DANGER);
             }
         });
     }
 
-    private void connect(final WifiP2pDevice d) {
+    private void connect(WifiP2pDevice d) {
+        connect(d, 0);
+    }
+
+    private void connect(final WifiP2pDevice d, final int attempt) {
         if (p2p == null || !ensurePermissions()) return;
         WifiP2pConfig c = new WifiP2pConfig();
         c.deviceAddress = d.deviceAddress;
@@ -1719,9 +1735,35 @@ public class MainActivity extends Activity implements Hub.Callback {
         p2p.connect(channel, c, new WifiP2pManager.ActionListener() {
             @Override public void onSuccess() { }
             @Override public void onFailure(int reason) {
-                setStatus("Gagal menghubungi " + d.deviceName + " (kode " + reason + ")", DANGER);
+                if (reason == WifiP2pManager.BUSY && attempt < 2) {
+                    // An earlier invitation (often to another phone) is still pending or a
+                    // scan is running. Cancel both, then try this phone again.
+                    setStatus("Wi‑Fi Direct sibuk, mencoba lagi…", AMBER);
+                    p2p.cancelConnect(channel, null);
+                    p2p.stopPeerDiscovery(channel, null);
+                    ui.postDelayed(new Runnable() {
+                        @Override public void run() { connect(d, attempt + 1); }
+                    }, 1500);
+                    return;
+                }
+                setStatus("Gagal menghubungi " + d.deviceName + ": " + p2pReason(reason), DANGER);
             }
         });
+    }
+
+    /** Plain words for WifiP2pManager failure codes. */
+    static String p2pReason(int reason) {
+        switch (reason) {
+            case WifiP2pManager.BUSY:
+                return "Wi‑Fi Direct sedang sibuk. Tunggu sebentar lalu coba lagi, "
+                        + "atau matikan-nyalakan Wi‑Fi";
+            case WifiP2pManager.P2P_UNSUPPORTED:
+                return "HP ini tidak mendukung Wi‑Fi Direct";
+            case WifiP2pManager.ERROR:
+                return "Wi‑Fi Direct error. Pastikan Wi‑Fi dan Lokasi menyala";
+            default:
+                return "kode " + reason;
+        }
     }
 
     private void disconnect() {
