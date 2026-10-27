@@ -108,6 +108,13 @@ public class MainActivity extends Activity implements Hub.Callback {
     private Handler ui;
 
     private Hub hub;
+    // Multihop: how to reach our owner's group (from JOIN_INFO), and the group we bridge to.
+    private byte[] upstreamInfo;
+    private Bridge.Info bridgeTo;
+    private Bridge bridge;
+    private android.net.Network uplinkNetwork;
+    private java.net.InetAddress uplinkTarget;
+    private boolean isOwner;
     private final Voice voice = new Voice();
     private String myName;
     private byte[] myPhoto;
@@ -259,6 +266,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (locations != null && locationListener != null) locations.removeUpdates(locationListener);
         if (receiver != null) unregisterReceiver(receiver);
         stopHub();
+        stopBridge();
         if (p2p != null) p2p.removeGroup(channel, null);
         voice.release();
         super.onDestroy();
@@ -1627,21 +1635,31 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void showProfileMenu() {
         final boolean sharing = shareLocation();
         int contacts = emergencyContacts().size();
-        String[] items = {"Ganti foto", "Ganti nama",
-                sharing ? "Bagikan lokasi: Nyala (ketuk untuk mematikan)" : "Bagikan lokasi: Mati (ketuk untuk menyalakan)",
-                contacts == 0 ? "Kontak darurat SMS: belum diatur" : "Kontak darurat SMS: " + contacts + " nomor",
-                myPhoto == null ? null : "Hapus foto"};
-        if (items[4] == null) items = new String[] {items[0], items[1], items[2], items[3]};
+        final List<String> labels = new ArrayList<String>();
+        final List<Runnable> actions = new ArrayList<Runnable>();
+        labels.add("Ganti foto");
+        actions.add(new Runnable() { @Override public void run() { pickPhoto(); } });
+        labels.add("Ganti nama");
+        actions.add(new Runnable() { @Override public void run() { askName(); } });
+        labels.add(sharing ? "Bagikan lokasi: Nyala (ketuk untuk mematikan)" : "Bagikan lokasi: Mati (ketuk untuk menyalakan)");
+        actions.add(new Runnable() { @Override public void run() { setShareLocation(!sharing); } });
+        labels.add(contacts == 0 ? "Kontak darurat SMS: belum diatur" : "Kontak darurat SMS: " + contacts + " nomor");
+        actions.add(new Runnable() { @Override public void run() { askEmergencyContacts(null); } });
+        if (canBridge()) {
+            labels.add("Jadi jembatan (percobaan)");
+            actions.add(new Runnable() { @Override public void run() { askBridge(); } });
+        } else if (bridgeTo != null) {
+            labels.add("Berhenti jadi jembatan");
+            actions.add(new Runnable() { @Override public void run() { disconnect(); } });
+        }
+        if (myPhoto != null) {
+            labels.add("Hapus foto");
+            actions.add(new Runnable() { @Override public void run() { saveProfile(myName, null); } });
+        }
         new AlertDialog.Builder(this)
                 .setTitle(myName)
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int which) {
-                        if (which == 0) pickPhoto();
-                        else if (which == 1) askName();
-                        else if (which == 2) setShareLocation(!sharing);
-                        else if (which == 3) askEmergencyContacts(null);
-                        else saveProfile(myName, null);
-                    }
+                .setItems(labels.toArray(new String[0]), new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) { actions.get(which).run(); }
                 })
                 .show();
     }
@@ -1783,6 +1801,8 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void disconnect() {
         stopHub();
+        stopBridge();
+        upstreamInfo = null;
         refreshAll();
         if (p2p == null) return;
         p2p.cancelConnect(channel, null);
@@ -1836,8 +1856,11 @@ public class MainActivity extends Activity implements Hub.Callback {
             updateKeepAlive();
             alertBanner.setVisibility(View.GONE);
             applyAudioRoute();
+            isOwner = info.isGroupOwner;
             if (info.isGroupOwner) {
                 hub.startServer(info.groupOwnerAddress);
+                shareJoinInfo(hub, info.groupOwnerAddress);
+                if (bridgeTo != null) joinUplink();
             } else {
                 setStatus("Menyiapkan saluran", AMBER);
                 hub.startClient(info.groupOwnerAddress);
@@ -1853,6 +1876,142 @@ public class MainActivity extends Activity implements Hub.Callback {
                 notifyAway(Alerts.CH_MESSAGES, "Koneksi grup terputus", "Buka aplikasi untuk menyambung lagi.");
             }
         }
+    }
+
+    // ------------------------------------------------------------ multihop
+
+    /**
+     * As group owner, also listens on the group's IPv6 link-local address and tells
+     * direct members how a bridge can reach this group.
+     */
+    private void shareJoinInfo(final Hub h, final java.net.InetAddress groupAddress) {
+        p2p.requestGroupInfo(channel, new WifiP2pManager.GroupInfoListener() {
+            @Override public void onGroupInfoAvailable(final android.net.wifi.p2p.WifiP2pGroup g) {
+                if (g == null || g.getPassphrase() == null) return;
+                new Thread(new Runnable() {
+                    @Override public void run() {
+                        java.net.Inet6Address local = null;
+                        for (int i = 0; i < 10 && local == null; i++) {
+                            local = Bridge.linkLocalOf(groupAddress);
+                            if (local == null) {
+                                try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                            }
+                        }
+                        if (local == null || h != hub) return;
+                        h.startServer(local);
+                        h.setJoinInfo(Bridge.encode(g.getNetworkName(), g.getPassphrase(),
+                                Bridge.withoutScope(local)));
+                    }
+                }, "join-info").start();
+            }
+        });
+    }
+
+    private boolean canBridge() {
+        return hub != null && !isOwner && bridgeTo == null && Bridge.decode(upstreamInfo) != null;
+    }
+
+    private void askBridge() {
+        new AlertDialog.Builder(this)
+                .setTitle("Jadi jembatan (percobaan)")
+                .setMessage("HP ini akan membuat grup baru untuk HP yang lebih jauh, sambil tetap "
+                        + "tersambung ke grup sekarang lewat Wi‑Fi. Semua anggota di kedua sisi "
+                        + "saling mendengar dan melihat chat.\n\n"
+                        + "Letakkan HP ini di tengah, di antara grup dan HP yang jauh. "
+                        + "Android mungkin meminta izin menyambung ke Wi‑Fi \"DIRECT-…\"; pilih Sambungkan.")
+                .setPositiveButton("Mulai", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { startBridge(); }
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    /** Leaves the owner's Wi-Fi Direct group and forms our own; onConnection then adds the uplink. */
+    private void startBridge() {
+        final Bridge.Info info = Bridge.decode(upstreamInfo);
+        if (info == null || p2p == null) return;
+        bridgeTo = info;
+        stopHub();
+        refreshAll();
+        addSystemMessage("Menyiapkan jembatan…");
+        setStatus("Menyiapkan jembatan", AMBER);
+        p2p.removeGroup(channel, new WifiP2pManager.ActionListener() {
+            @Override public void onSuccess() { createBridgeGroup(); }
+            @Override public void onFailure(int reason) { createBridgeGroup(); }
+        });
+    }
+
+    private void createBridgeGroup() {
+        ui.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (bridgeTo == null) return;
+                p2p.createGroup(channel, new WifiP2pManager.ActionListener() {
+                    @Override public void onSuccess() { }
+                    @Override public void onFailure(int reason) {
+                        bridgeTo = null;
+                        setStatus("Gagal membuat grup jembatan (kode " + reason + ")", DANGER);
+                    }
+                });
+            }
+        }, 1000);
+    }
+
+    private void joinUplink() {
+        if (bridge == null) bridge = new Bridge(this);
+        bridge.join(bridgeTo, new Bridge.Listener() {
+            @Override public void onNetwork(final android.net.Network n, final java.net.InetAddress target) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        uplinkNetwork = n;
+                        uplinkTarget = target;
+                        connectUplink();
+                    }
+                });
+            }
+
+            @Override public void onFailed(final String reason) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (bridgeTo == null) return;
+                        addSystemMessage("Jembatan gagal: " + reason + ". Grup di HP ini tetap jalan.");
+                    }
+                });
+            }
+        });
+    }
+
+    private void connectUplink() {
+        if (hub == null || hub.isBridged() || uplinkNetwork == null || bridgeTo == null) return;
+        hub.startUplink(uplinkTarget, Hub.PORT, uplinkNetwork.getSocketFactory());
+    }
+
+    private void stopBridge() {
+        bridgeTo = null;
+        uplinkNetwork = null;
+        uplinkTarget = null;
+        if (bridge != null) bridge.leave();
+    }
+
+    @Override public void onJoinInfo(final byte[] info) {
+        ui.post(new Runnable() {
+            @Override public void run() { upstreamInfo = info; }
+        });
+    }
+
+    @Override public void onUplink(final boolean connected) {
+        ui.post(new Runnable() {
+            @Override public void run() {
+                if (bridgeTo == null) return;
+                if (connected) {
+                    addSystemMessage("Jembatan tersambung. HP yang lebih jauh bisa bergabung lewat HP ini.");
+                } else {
+                    addSystemMessage("Jembatan terputus dari grup utama. Mencoba lagi…");
+                    ui.postDelayed(new Runnable() {
+                        @Override public void run() { connectUplink(); }
+                    }, 3000);
+                }
+            }
+        });
     }
 
     private void stopHub() {
