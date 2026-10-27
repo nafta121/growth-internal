@@ -1,0 +1,30 @@
+name: Usul fitur
+description: Ide yang membantu keluarga, rombongan, posko, atau tim Anda.
+title: "[Usul] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: kebutuhan
+    attributes:
+      label: Kebutuhan apa yang belum terpenuhi?
+      description: Ceritakan situasinya. Siapa, di mana, dan apa yang sulit dilakukan sekarang.
+      placeholder: "Saat mendaki, rombongan kami terpisah dan tidak tahu siapa yang sudah sampai pos."
+    validations:
+      required: true
+  - type: textarea
+    id: usulan
+    attributes:
+      label: Usulan Anda
+      description: Bagaimana menurut Anda aplikasi sebaiknya membantu?
+  - type: dropdown
+    id: pemakai
+    attributes:
+      label: Anda memakai Saling Jaga untuk
+      multiple: true
+      options:
+        - Keluarga atau tetangga
+        - Pendakian atau kegiatan alam
+        - Relawan atau posko bencana
+        - Sekolah atau kampus
+        - Perusahaan atau K3
+        - Lainnya
