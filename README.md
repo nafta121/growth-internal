@@ -12,6 +12,11 @@
   <a href="https://chalidade.github.io/saling-jaga/">Situs web</a>
 </p>
 
+<p align="center">
+  <a href="https://chalidade.github.io/saling-jaga/#video"><img src="docs/media/launch-poster.jpg" alt="Tonton video demo Saling Jaga (32 detik)" width="720"></a>
+  <br><sub>▶ Tonton video demo 32 detik: <a href="docs/media/saling-jaga-launch.mp4">unduh MP4</a> atau <a href="https://chalidade.github.io/saling-jaga/#video">putar di situs</a></sub>
+</p>
+
 ---
 
 Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang paling membutuhkannya. Hal yang sama terjadi di gunung, hutan, atau laut. **Saling Jaga** menghubungkan HP secara langsung lewat radio Wi‑Fi di dalam HP (Wi‑Fi Direct). Tidak butuh kartu SIM, router, server, atau Google Play Services. Orang dalam satu rombongan tetap bisa bicara, saling tahu kondisi masing-masing, dan menemukan satu sama lain.

@@ -140,6 +140,13 @@
   .end p { color: var(--muted); margin: 0 0 24px; max-width: 520px; }
   @media (max-width: 640px) { .end { grid-template-columns: 1fr; gap: 24px; padding-top: 88px; } .end img { width: 120px; } }
 
+  .film video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 24px; border: 1px solid var(--line); background: var(--paper); box-shadow: 0 30px 60px -36px rgba(19, 32, 26, .35); }
+  .chapters { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .chapters button { width: 100%; text-align: left; font: inherit; font-size: 15px; color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; cursor: pointer; }
+  .chapters button:hover, .chapters button:focus-visible { border-color: var(--leaf); }
+  .chapters b { display: block; font-size: 13px; color: var(--leaf); font-variant-numeric: tabular-nums; }
+  @media (max-width: 760px) { .chapters { grid-template-columns: repeat(2, 1fr); } .film video { border-radius: 16px; } }
+
   footer { border-top: 1px solid var(--line); padding: 24px 0 40px; font-size: 14px; color: var(--muted); }
   footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
 </style>
@@ -150,6 +157,7 @@
   <nav class="nav">
     <a class="brand" href="#"><img src="brand/mark.png" alt="">Saling Jaga</a>
     <div class="nav-links">
+      <a class="opt" href="#video">Video</a>
       <a class="opt" href="#fitur">Fitur</a>
       <a class="opt" href="#instal">Instal</a>
       <a class="opt" href="#keamanan">Keamanan</a>
@@ -187,6 +195,33 @@
 </div>
 
 <main class="wrap">
+  <section id="video" class="film">
+    <p class="label">Lihat cara kerjanya</p>
+    <h2>Dari sinyal hilang sampai saling menemukan, dalam 32 detik.</h2>
+    <p class="intro">Satu rombongan, empat HP, tanpa BTS. Mereka saling menemukan, bicara, membagikan titik kumpul, dan saat Sari mengirim SOS, kompas menuntun ke arahnya.</p>
+    <video controls playsinline preload="none" poster="media/launch-poster.jpg" aria-label="Video demo Saling Jaga: mencari perangkat, walkie-talkie, pengumuman, status, SOS, dan kompas tanpa sinyal">
+      <source src="media/saling-jaga-launch.mp4" type="video/mp4">
+    </video>
+    <ol class="chapters">
+      <li><button type="button" data-t="0"><b>0:00</b>Sinyal hilang</button></li>
+      <li><button type="button" data-t="3.4"><b>0:03</b>HP saling menemukan</button></li>
+      <li><button type="button" data-t="7.4"><b>0:07</b>Tahan untuk bicara</button></li>
+      <li><button type="button" data-t="11.9"><b>0:12</b>Pengumuman</button></li>
+      <li><button type="button" data-t="13.9"><b>0:14</b>Status dan SOS</button></li>
+      <li><button type="button" data-t="17.8"><b>0:18</b>Kompas ke arah Sari</button></li>
+      <li><button type="button" data-t="23.9"><b>0:24</b>Tanpa sinyal, tanpa server</button></li>
+      <li><button type="button" data-t="27.8"><b>0:28</b>Unduh gratis</button></li>
+    </ol>
+    <script>
+      document.querySelectorAll('.chapters button').forEach((b) => b.addEventListener('click', () => {
+        const v = document.querySelector('.film video');
+        // preload="none": a seek before metadata loads is dropped, so wait for it
+        const go = () => { v.currentTime = +b.dataset.t; v.play(); };
+        if (v.readyState >= 1) go(); else { v.addEventListener('loadedmetadata', go, { once: true }); v.load(); }
+      }));
+    </script>
+  </section>
+
   <section>
     <p class="label">Kenapa</p>
     <h2>Sinyal biasanya hilang tepat saat paling dibutuhkan.</h2>
