@@ -27,6 +27,7 @@ final class Hub implements Link.Listener {
         void onTalkState(String from, boolean talking);
         void onPresence(String from, byte[] presence);
         void onAnnouncement(String from, String text);
+        void onImage(String from, byte[] jpeg);
         void onRejected(String reason);
     }
 
@@ -128,6 +129,10 @@ final class Hub implements Link.Listener {
         broadcast(new Frame(Frame.TEXT, myName, text.getBytes(UTF8)), null);
     }
 
+    void sendImage(byte[] jpeg) {
+        broadcast(new Frame(Frame.IMAGE, myName, jpeg), null);
+    }
+
     void sendAudio(byte[] pcm) {
         broadcast(new Frame(Frame.AUDIO, myName, pcm), null);
     }
@@ -201,6 +206,9 @@ final class Hub implements Link.Listener {
                 break;
             case Frame.ANNOUNCE:
                 cb.onAnnouncement(f.sender, new String(f.payload, UTF8));
+                break;
+            case Frame.IMAGE:
+                cb.onImage(f.sender, f.payload);
                 break;
             case Frame.LEAVE:
                 removeMember(f.sender);

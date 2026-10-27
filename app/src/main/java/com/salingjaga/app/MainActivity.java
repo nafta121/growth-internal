@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -11,6 +12,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.graphics.Typeface;
@@ -39,6 +41,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Vibrator;
+import android.provider.MediaStore;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -74,6 +77,8 @@ import java.util.Set;
 public class MainActivity extends Activity implements Hub.Callback {
     private static final int REQ_PERMS = 1;
     private static final int REQ_PHOTO = 2;
+    private static final int REQ_CAMERA = 3;
+    private static final int REQ_SEND_PHOTO = 4;
 
     // Saling Jaga palette: forest green, leaf green, warm cream.
     private static final int BRAND = Color.rgb(28, 82, 51);
@@ -270,6 +275,12 @@ public class MainActivity extends Activity implements Hub.Callback {
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
         g.setColor(color);
+        return g;
+    }
+
+    private GradientDrawable ovalStroke(int color, int stroke) {
+        GradientDrawable g = oval(color);
+        g.setStroke(dp(1), stroke);
         return g;
     }
 
@@ -498,6 +509,15 @@ public class MainActivity extends Activity implements Hub.Callback {
 
         // Message input.
         LinearLayout inputRow = row();
+        FrameLayout photo = roundButton(46, CARD, icon(R.drawable.ic_image, ACCENT, 22));
+        photo.setElevation(0);
+        photo.setBackground(pressable(ovalStroke(CARD, LINE)));
+        photo.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { askPhotoSource(); }
+        });
+        LinearLayout.LayoutParams pl = lp(dp(46), dp(46));
+        pl.rightMargin = dp(8);
+        inputRow.addView(photo, pl);
         input = new EditText(this);
         input.setHint("Tulis pesan");
         input.setTextSize(15);
@@ -789,6 +809,117 @@ public class MainActivity extends Activity implements Hub.Callback {
         t.setMaxWidth(maxW);
         wrapRow.addView(b, wrap());
         addChatView(wrapRow);
+    }
+
+    private void addImageBubble(String from, final byte[] jpeg, boolean mine) {
+        Bitmap thumb = Photos.decode(jpeg, 720);
+        if (thumb == null) return;
+        LinearLayout wrapRow = row();
+        wrapRow.setGravity(mine ? Gravity.END : Gravity.START);
+        LinearLayout b = column();
+        b.setPadding(dp(6), dp(6), dp(6), dp(6));
+        b.setBackground(shape(mine ? ACCENT : CARD, 16, mine ? 0 : LINE));
+        if (!mine) {
+            TextView name = text(from, 12, ACCENT, true);
+            name.setPadding(dp(8), dp(2), dp(8), dp(4));
+            b.addView(name);
+        }
+        ImageView img = new ImageView(this);
+        img.setImageBitmap(thumb);
+        img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        img.setBackground(shape(LINE, 12, 0));
+        img.setClipToOutline(true);
+        int w = (int) (getResources().getDisplayMetrics().widthPixels * 0.62f);
+        int h = Math.min(w * 4 / 3, Math.round(w * (float) thumb.getHeight() / thumb.getWidth()));
+        img.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showPhoto(jpeg); }
+        });
+        b.addView(img, lp(w, h));
+        TextView time = text(now(), 11, mine ? 0xCCFFFFFF : SUB, false);
+        time.setGravity(Gravity.END);
+        time.setPadding(dp(8), dp(4), dp(8), 0);
+        b.addView(time, fill());
+        wrapRow.addView(b, wrap());
+        addChatView(wrapRow);
+    }
+
+    private void showPhoto(byte[] jpeg) {
+        Bitmap full = Photos.decode(jpeg, 2048);
+        if (full == null) return;
+        final android.app.Dialog d = new android.app.Dialog(this,
+                android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        ImageView v = new ImageView(this);
+        v.setImageBitmap(full);
+        v.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        v.setBackgroundColor(Color.BLACK);
+        v.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View x) { d.dismiss(); }
+        });
+        d.setContentView(v);
+        d.show();
+    }
+
+    private void askPhotoSource() {
+        if (!ready()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Kirim foto ke grup")
+                .setItems(new String[] {"Ambil foto dengan kamera", "Pilih dari galeri"},
+                        new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int which) {
+                                if (which == 0) takePhoto(); else pickPhotoToSend();
+                            }
+                        })
+                .show();
+    }
+
+    /** The camera app writes a full-size photo into our CaptureProvider; no camera permission needed. */
+    private void takePhoto() {
+        Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        i.putExtra(MediaStore.EXTRA_OUTPUT, CaptureProvider.PHOTO);
+        i.setClipData(ClipData.newRawUri("", CaptureProvider.PHOTO));
+        i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(i, REQ_CAMERA);
+        } catch (RuntimeException e) {
+            toast("Tidak ada aplikasi kamera");
+        }
+    }
+
+    private void pickPhotoToSend() {
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("image/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(i, "Pilih foto"), REQ_SEND_PHOTO);
+        } catch (RuntimeException e) {
+            toast("Tidak ada aplikasi galeri");
+        }
+    }
+
+    /** Shrinks the photo off the UI thread, then sends it and shows it in the chat. */
+    private void sendPhoto(final Uri uri) {
+        toast("Menyiapkan foto…");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final byte[] jpeg = Photos.prepare(getContentResolver(), uri);
+                    ui.post(new Runnable() {
+                        @Override public void run() {
+                            if (hub == null || !hub.hasPeers()) {
+                                toast("Belum terhubung ke HP lain");
+                                return;
+                            }
+                            hub.sendImage(jpeg);
+                            addImageBubble(myName, jpeg, true);
+                        }
+                    });
+                } catch (Exception e) {
+                    ui.post(new Runnable() {
+                        @Override public void run() { toast("Foto tidak bisa dibuka"); }
+                    });
+                }
+            }
+        }, "photo-prepare").start();
     }
 
     private void addSystemMessage(String s) {
@@ -1280,6 +1411,14 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     @Override protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
+        if (req == REQ_CAMERA && result == RESULT_OK) {
+            sendPhoto(CaptureProvider.PHOTO);
+            return;
+        }
+        if (req == REQ_SEND_PHOTO && result == RESULT_OK && data != null && data.getData() != null) {
+            sendPhoto(data.getData());
+            return;
+        }
         if (req != REQ_PHOTO || result != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         try {
@@ -1582,6 +1721,15 @@ public class MainActivity extends Activity implements Hub.Callback {
                 updateKeepAlive();
                 if (members.isEmpty()) setStatus("Tidak ada anggota tersambung", DANGER);
                 else setStatus("Terhubung · " + (members.size() + 1) + " orang", ACCENT);
+            }
+        });
+    }
+
+    @Override public void onImage(final String from, final byte[] jpeg) {
+        ui.post(new Runnable() {
+            @Override public void run() {
+                addImageBubble(from, jpeg, false);
+                notifyAway(Alerts.CH_MESSAGES, from, "Mengirim foto");
             }
         });
     }
