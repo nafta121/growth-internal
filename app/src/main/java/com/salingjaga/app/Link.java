@@ -1,0 +1,109 @@
+package com.salingjaga.app;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.net.Socket;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
+/** A TCP connection to one other phone, with its own reader and writer threads. */
+final class Link {
+    interface Listener {
+        void onFrame(Link link, Frame frame);
+        void onClosed(Link link);
+    }
+
+    private static final int MAX_QUEUED_AUDIO = 25;
+    // Each side pings when idle; a link silent for longer than the timeout is dropped,
+    // so a phone walking out of range is noticed within seconds.
+    private static final int PING_MS = 3000;
+    private static final int TIMEOUT_MS = 10000;
+
+    private final Socket socket;
+    private final Listener listener;
+    private final DataInputStream in;
+    private final DataOutputStream out;
+    private final LinkedBlockingQueue<Frame> queue = new LinkedBlockingQueue<Frame>();
+    private volatile boolean closed;
+    private Thread writer;
+    volatile String peerName;
+    volatile byte[] peerPhoto;
+
+    Link(Socket socket, Listener listener) throws IOException {
+        this.socket = socket;
+        this.listener = listener;
+        socket.setTcpNoDelay(true);
+        socket.setSoTimeout(TIMEOUT_MS);
+        in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+        out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+    }
+
+    void start() {
+        writer = new Thread(new Runnable() {
+            @Override public void run() { writeLoop(); }
+        }, "link-writer");
+        Thread reader = new Thread(new Runnable() {
+            @Override public void run() { readLoop(); }
+        }, "link-reader");
+        writer.start();
+        reader.start();
+    }
+
+    void send(Frame f) {
+        if (closed) return;
+        // Drop audio rather than build up delay when the radio link is slow.
+        if (f.type == Frame.AUDIO && queue.size() > MAX_QUEUED_AUDIO) return;
+        queue.offer(f);
+    }
+
+    boolean isClosed() { return closed; }
+
+    private void writeLoop() {
+        try {
+            while (!closed) {
+                Frame f = queue.poll(PING_MS, TimeUnit.MILLISECONDS);
+                if (f == null) f = new Frame(Frame.PING, "", null);
+                out.writeByte(f.type);
+                out.writeUTF(f.sender);
+                out.writeInt(f.payload.length);
+                out.write(f.payload);
+                if (queue.isEmpty()) out.flush();
+            }
+        } catch (InterruptedException ignored) {
+        } catch (IOException e) {
+            close();
+        }
+    }
+
+    private void readLoop() {
+        try {
+            while (!closed) {
+                byte type = in.readByte();
+                String sender = in.readUTF();
+                int n = in.readInt();
+                if (n < 0 || n > Frame.maxPayload(type) || sender.length() > 40) {
+                    throw new IOException("bad frame");
+                }
+                byte[] p = new byte[n];
+                in.readFully(p);
+                if (type == Frame.PING) continue;
+                listener.onFrame(this, new Frame(type, sender, p));
+            }
+        } catch (IOException e) {
+            close();
+        }
+    }
+
+    void close() {
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+        }
+        try { socket.close(); } catch (IOException ignored) { }
+        if (writer != null) writer.interrupt();
+        listener.onClosed(this);
+    }
+}
