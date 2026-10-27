@@ -23,7 +23,7 @@ Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang pali
 
 Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan perusahaan menjadi dasar model bisnisnya (lihat [Model keberlanjutan](#model-keberlanjutan)).
 
-> **Status:** MVP v0.7.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
+> **Status:** MVP v0.8.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
 
 ## Tampilan
 
@@ -47,6 +47,10 @@ Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan
 | --- | --- | --- |
 | <img src="docs/screenshots/11-menu-profil.png" width="240"> | <img src="docs/screenshots/12-kontak-darurat-sms.png" width="240"> | <img src="docs/screenshots/14-kirim-foto.png" width="240"> |
 
+| Kirim video | | |
+| --- | --- | --- |
+| <img src="docs/screenshots/15-kirim-video.png" width="240"> | | |
+
 Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#pengujian)). Nama dan pesan di dalamnya hanya contoh.
 
 ## Fitur
@@ -56,6 +60,7 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 - **Mode telepon**: suara dua arah terus-menerus, dengan peredam gema dan derau bawaan HP.
 - **Chat teks** dan **Pengumuman**. Pengumuman berupa kartu kuning yang berbunyi di semua HP, cocok untuk info titik kumpul dari posko atau ketua rombongan.
 - **Kirim foto** dari kamera atau galeri. Foto dikecilkan otomatis (maks. 1280 px, di bawah 400 KB) supaya cepat terkirim, dan bisa diketuk untuk dilihat penuh. Kamera dibuka lewat aplikasi kamera HP, sehingga Saling Jaga tidak butuh izin kamera.
+- **Kirim klip video** maksimal 15 detik dengan kualitas hemat (maks. 4 MB). Klip dikirim dalam potongan 32 KB yang hanya jalan saat tidak ada suara atau chat yang antre, jadi push-to-talk dan telepon tetap lancar. Anggota lain melihat "mengirim video…" sampai klip lengkap, lalu bisa memutarnya di aplikasi.
 - **Grup lebih dari 2 HP**. Satu HP menjadi pemilik grup dan meneruskan suara serta pesan ke semua anggota.
 
 **Keselamatan**
@@ -103,7 +108,7 @@ Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk a
   | Internet / jaringan | Membuka koneksi TCP ke HP lain di grup. Tidak dipakai untuk menghubungi server mana pun |
   | Getar, wake lock, layanan latar | Alarm SOS dan tetap tersambung saat layar mati |
 
-  Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto dipilih lewat pemilih foto bawaan Android atau diambil lewat aplikasi kamera HP, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
+  Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto dan video dipilih lewat pemilih bawaan Android atau direkam lewat aplikasi kamera HP, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
 
 ## Cara pakai
 
@@ -129,7 +134,7 @@ Jangkauan Wi‑Fi Direct biasanya 50–100 m di area terbuka dan lebih pendek di
 ```
 
 - **Penemuan dan koneksi**: memakai `WifiP2pManager` bawaan Android, tanpa library pihak ketiga.
-- **Protokol**: frame biner sederhana di atas TCP, berisi `tipe · pengirim · panjang · isi`. Tipenya `HELLO` (nama + foto), `TEXT`, `IMAGE` (JPEG), `AUDIO` (PCM 16 kHz mono, potongan 20 ms), `TALK_START/END`, `PRESENCE` (status, baterai, lokasi), `ANNOUNCE`, `LEAVE`, `PING`, dan `REJECT`.
+- **Protokol**: frame biner sederhana di atas TCP, berisi `tipe · pengirim · panjang · isi`. Tipenya `HELLO` (nama + foto), `TEXT`, `IMAGE` (JPEG), `VIDEO_CHUNK` (potongan klip 32 KB), `AUDIO` (PCM 16 kHz mono, potongan 20 ms), `TALK_START/END`, `PRESENCE` (status, baterai, lokasi), `ANNOUNCE`, `LEAVE`, `PING`, dan `REJECT`.
 - **Relay**: pemilik grup meneruskan setiap frame ke anggota lain. Ia juga mengirim ulang daftar anggota dan status terakhir, termasuk SOS yang masih aktif, ke HP yang baru bergabung.
 - **Deteksi putus**: setiap koneksi mengirim `PING` tiap 3 detik. Koneksi yang diam lebih dari 10 detik dianggap putus.
 - **Latar belakang**: foreground service menahan CPU dan Wi‑Fi tetap aktif selama berada di grup.
@@ -140,7 +145,7 @@ Yang sudah diterapkan:
 - Server hanya mendengarkan di alamat grup Wi‑Fi Direct, sehingga perangkat di Wi‑Fi kafe atau hotspot yang sama tidak bisa masuk.
 - Lalu lintas di udara terenkripsi WPA2 milik Wi‑Fi Direct, dan anggota harus disetujui lewat undangan.
 - Pemilik grup menolak frame yang mengaku dari anggota lain, sehingga tidak ada SOS atau pengumuman palsu atas nama orang lain. Nama ganda dalam satu grup juga ditolak.
-- Ukuran setiap jenis pesan dan dimensi foto dibatasi, sehingga satu HP tidak bisa membuat HP lain crash.
+- Ukuran setiap jenis pesan, dimensi foto, dan jumlah klip video yang sedang disusun dibatasi, sehingga satu HP tidak bisa membuat HP lain crash.
 
 Belum ada (direncanakan):
 - **Identitas terverifikasi**: kunci digital per HP, kode pendek `SJ-XXXX-XXXX` + QR untuk pendataan, dan label "Posko terverifikasi" untuk pengumuman resmi.
@@ -181,6 +186,7 @@ Kodenya ditulis dalam Java 8 dengan UI yang dibangun langsung di kode (tanpa XML
 cd tools/screenshot-tests && gradle test
 ```
 
+- `ClipsTest` menguji pemotongan dan penyusunan ulang klip video, termasuk potongan rusak, duplikat, dan batas memori.
 - `EmergencySmsTest` menguji pembersihan nomor kontak darurat dan isi SMS SOS.
 - `HubTest` menjalankan tiga hub di atas socket sungguhan. Yang diuji: relay pesan, teks, dan suara; pengiriman ulang SOS ke anggota baru; penolakan penyamaran; batas ukuran pesan; penolakan nama ganda; dan deteksi anggota keluar.
 - `ScreenshotTest` merender layar aplikasi dengan Robolectric (native graphics) ke `tools/screenshot-tests/out/`. Gambar di README berasal dari tes ini.
@@ -205,7 +211,8 @@ app/src/main/
     RadarView.java         radar kompas
     Avatars.java           foto profil bulat / inisial
     Photos.java            kompres & decode foto yang dikirim di grup
-    CaptureProvider.java   file tujuan foto kamera (tanpa izin kamera)
+    Clips.java             potong & susun ulang klip video yang dikirim di grup
+    CaptureProvider.java   file tujuan foto/video kamera (tanpa izin kamera)
     Alerts.java            notifikasi sistem
     EmergencySms.java      SOS lewat SMS: nomor kontak dan isi pesan
     KeepAliveService.java  tetap tersambung saat layar mati

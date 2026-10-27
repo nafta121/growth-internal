@@ -209,6 +209,16 @@ public class ScreenshotTest {
         f.onText("Budi", "Bisa, air setinggi lutut. Lewat kiri.");
         ShadowLooper.idleMainLooper();
         snap(f, "14-kirim-foto");
+
+        MainActivity v = group();
+        call(v, "addBubble", new Class<?>[] {String.class, String.class, boolean.class},
+                "Chalid", "Ada yang bisa rekam kondisi jembatan?", true);
+        v.onVideoIncoming("Sari");
+        v.onVideo("Sari", new byte[64 * 1024]);
+        ShadowLooper.idleMainLooper();
+        v.onText("Sari", "Ini 10 detik lalu. Arus deras, jangan lewat sini.");
+        ShadowLooper.idleMainLooper();
+        snap(v, "15-kirim-video");
     }
 
     /** A simple drawn street scene standing in for a phone photo. */
