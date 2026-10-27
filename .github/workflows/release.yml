@@ -1,0 +1,63 @@
+name: Release APK
+
+# Every push to main publishes the APK to the GitHub Release for the current versionName,
+# so README and the website can link to .../releases/latest/download/saling-jaga.apk.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Android build tools from Ubuntu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y android-sdk-platform-23 aapt dalvik-exchange apksigner zipalign
+
+      - name: Restore release key (optional)
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then
+            echo "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SIGNING_KEYSTORE_B64 belum diisi, APK ditandatangani kunci sementara."
+          fi
+
+      - name: Build APK
+        env:
+          KS_PASS: ${{ secrets.SIGNING_KS_PASS || 'android' }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || 'androiddebugkey' }}
+          KEY_PASS: ${{ secrets.SIGNING_KEY_PASS || secrets.SIGNING_KS_PASS || 'android' }}
+        run: |
+          ./build.sh
+          cp build/saling-jaga-debug.apk build/saling-jaga.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -o 'android:versionName="[^"]*"' app/src/main/AndroidManifest.xml | cut -d'"' -f2)
+          TAG="v$VERSION"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Saling Jaga $VERSION" --latest \
+              --notes "APK Saling Jaga $VERSION untuk Android 6.0 ke atas. Unduh **saling-jaga.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP."
+          fi
+          gh release upload "$TAG" build/saling-jaga.apk --clobber

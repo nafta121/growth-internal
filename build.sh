@@ -17,12 +17,17 @@ java -jar "$DX_JAR" --dex --min-sdk-version=23 --output="$OUT/dex/classes.dex" "
 (cd "$OUT/dex" && aapt add ../unsigned.apk classes.dex >/dev/null)
 zipalign -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
 
+# Release builds pass KEYSTORE, KS_PASS, KEY_ALIAS and KEY_PASS; otherwise a local debug key is used.
 KS=${KEYSTORE:-debug.keystore}
+KS_PASS=${KS_PASS:-android}
+KEY_ALIAS=${KEY_ALIAS:-androiddebugkey}
+KEY_PASS=${KEY_PASS:-$KS_PASS}
+export KS_PASS KEY_PASS
 if [ ! -f "$KS" ]; then
-  keytool -genkeypair -keystore "$KS" -storepass android -keypass android -alias androiddebugkey \
+  keytool -genkeypair -keystore "$KS" -storepass "$KS_PASS" -keypass "$KEY_PASS" -alias "$KEY_ALIAS" \
     -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Saling Jaga Debug" >/dev/null 2>&1
 fi
-apksigner sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
+apksigner sign --ks "$KS" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
   --out "$OUT/saling-jaga-debug.apk" "$OUT/aligned.apk"
 apksigner verify "$OUT/saling-jaga-debug.apk"
 echo "APK: $OUT/saling-jaga-debug.apk"

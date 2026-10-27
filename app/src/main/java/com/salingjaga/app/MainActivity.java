@@ -201,6 +201,12 @@ public class MainActivity extends Activity implements Hub.Callback {
         addSystemMessage("Tanpa internet dan sinyal. Nyalakan Wi‑Fi dan Lokasi di setiap HP, "
                 + "lalu ketuk ikon cari.");
         if (ensurePermissions()) startLocation();
+        // First launch: the default name is the phone model, which nobody in the group recognizes.
+        if (state == null && !prefs.contains("name")) {
+            ui.postDelayed(new Runnable() {
+                @Override public void run() { if (!isFinishing()) askName(); }
+            }, 1500);
+        }
     }
 
     @Override protected void onResume() {
