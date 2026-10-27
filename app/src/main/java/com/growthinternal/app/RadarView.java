@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -119,7 +119,7 @@ final class RadarView extends View {
             double a = Math.toRadians(i * 90 - heading);
             float x = cx + (float) Math.sin(a) * (r + dp(16));
             float y = cy - (float) Math.cos(a) * (r + dp(16)) + dp(5);
-            label.setColor(i == 0 ? 0xFFD93636 : sub);
+            label.setColor(i == 0 ? 0xFFD61E20 : sub);
             c.drawText(names[i], x, y, label);
         }
 

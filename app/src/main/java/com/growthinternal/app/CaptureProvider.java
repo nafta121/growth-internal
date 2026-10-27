@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
@@ -16,7 +16,7 @@ import java.io.FileNotFoundException;
  * these two capture files are served, and only to apps the activity grants access to.
  */
 public final class CaptureProvider extends ContentProvider {
-    static final String AUTHORITY = "com.salingjaga.app.capture";
+    static final String AUTHORITY = "com.growthinternal.app.capture";
     static final Uri PHOTO = Uri.parse("content://" + AUTHORITY + "/photo.jpg");
     static final Uri VIDEO = Uri.parse("content://" + AUTHORITY + "/video.mp4");
 

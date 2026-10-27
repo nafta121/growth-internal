@@ -1,25 +1,25 @@
 <p align="center">
-  <img src="docs/brand/logo-wordmark-transparent.png" alt="Saling Jaga" width="220">
+  <img src="docs/brand/logo-wordmark-transparent.png" alt="Growth Internal" width="220">
 </p>
 
 <p align="center"><b>Connecting in Crisis</b>: telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal.</p>
 
 <p align="center">
-  <a href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk"><b>⬇️ Unduh APK</b></a>
+  <a href="https://github.com/nafta121/growth-internal/releases/latest/download/growth-internal.apk"><b>⬇️ Unduh APK</b></a>
   &nbsp;·&nbsp;
   <a href="#cara-instal-di-hp">Cara instal</a>
   &nbsp;·&nbsp;
-  <a href="https://chalidade.github.io/saling-jaga/">Situs web</a>
+  <a href="https://nafta121.github.io/growth-internal/">Situs web</a>
 </p>
 
 <p align="center">
-  <a href="https://chalidade.github.io/saling-jaga/#video"><img src="docs/media/launch-poster.jpg" alt="Tonton video demo Saling Jaga (32 detik)" width="720"></a>
-  <br><sub>▶ Tonton video demo 32 detik: <a href="docs/media/saling-jaga-launch.mp4">unduh MP4</a> atau <a href="https://chalidade.github.io/saling-jaga/#video">putar di situs</a></sub>
+  <a href="https://nafta121.github.io/growth-internal/#video"><img src="docs/media/launch-poster.jpg" alt="Tonton video demo Growth Internal (32 detik)" width="720"></a>
+  <br><sub>▶ Tonton video demo 32 detik: <a href="docs/media/saling-jaga-launch.mp4">unduh MP4</a> atau <a href="https://nafta121.github.io/growth-internal/#video">putar di situs</a></sub>
 </p>
 
 ---
 
-Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang paling membutuhkannya. Hal yang sama terjadi di gunung, hutan, atau laut. **Saling Jaga** menghubungkan HP secara langsung lewat radio Wi‑Fi di dalam HP (Wi‑Fi Direct). Tidak butuh kartu SIM, router, server, atau Google Play Services. Orang dalam satu rombongan tetap bisa bicara, saling tahu kondisi masing-masing, dan menemukan satu sama lain.
+Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang paling membutuhkannya. Hal yang sama terjadi di gunung, hutan, atau laut. **Growth Internal** menghubungkan HP secara langsung lewat radio Wi‑Fi di dalam HP (Wi‑Fi Direct). Tidak butuh kartu SIM, router, server, atau Google Play Services. Orang dalam satu rombongan tetap bisa bicara, saling tahu kondisi masing-masing, dan menemukan satu sama lain.
 
 Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan perusahaan menjadi dasar model bisnisnya (lihat [Model keberlanjutan](#model-keberlanjutan)).
 
@@ -59,7 +59,7 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 - **Tahan untuk bicara**: walkie-talkie ke seluruh anggota grup.
 - **Mode telepon**: suara dua arah terus-menerus, dengan peredam gema dan derau bawaan HP.
 - **Chat teks** dan **Pengumuman**. Pengumuman berupa kartu kuning yang berbunyi di semua HP, cocok untuk info titik kumpul dari posko atau ketua rombongan.
-- **Kirim foto** dari kamera atau galeri. Foto dikecilkan otomatis (maks. 1280 px, di bawah 400 KB) supaya cepat terkirim, dan bisa diketuk untuk dilihat penuh. Kamera dibuka lewat aplikasi kamera HP, sehingga Saling Jaga tidak butuh izin kamera.
+- **Kirim foto** dari kamera atau galeri. Foto dikecilkan otomatis (maks. 1280 px, di bawah 400 KB) supaya cepat terkirim, dan bisa diketuk untuk dilihat penuh. Kamera dibuka lewat aplikasi kamera HP, sehingga Growth Internal tidak butuh izin kamera.
 - **Kirim klip video** maksimal 15 detik dengan kualitas hemat (maks. 4 MB). Klip dikirim dalam potongan 32 KB yang hanya jalan saat tidak ada suara atau chat yang antre, jadi push-to-talk dan telepon tetap lancar. Anggota lain melihat "mengirim video…" sampai klip lengkap, lalu bisa memutarnya di aplikasi.
 - **Grup lebih dari 2 HP**. Satu HP menjadi pemilik grup dan meneruskan suara serta pesan ke semua anggota.
 
@@ -80,11 +80,11 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 
 ## Cara instal di HP
 
-Saling Jaga belum ada di Play Store, jadi dipasang langsung dari file APK (sekitar 200 KB, Android 6.0 ke atas). Pasang sebelum bencana atau sebelum berangkat, selagi masih ada internet.
+Growth Internal belum ada di Play Store, jadi dipasang langsung dari file APK (sekitar 200 KB, Android 6.0 ke atas). Pasang sebelum bencana atau sebelum berangkat, selagi masih ada internet.
 
-1. Buka link ini di HP Android: **[saling-jaga.apk](https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk)**. Semua versi ada di halaman [Releases](https://github.com/chalidade/saling-jaga/releases).
+1. Buka link ini di HP Android: **[growth-internal.apk](https://github.com/nafta121/growth-internal/releases/latest/download/growth-internal.apk)**. Semua versi ada di halaman [Releases](https://github.com/nafta121/growth-internal/releases).
 2. Kalau browser memperingatkan file berbahaya, pilih **Tetap unduh**. Peringatan ini muncul untuk semua APK dari luar Play Store.
-3. Buka `saling-jaga.apk` dari notifikasi unduhan atau aplikasi File.
+3. Buka `growth-internal.apk` dari notifikasi unduhan atau aplikasi File.
 4. Jika muncul "Instal aplikasi tidak dikenal", ketuk **Setelan**, aktifkan **Izinkan dari sumber ini**, lalu kembali.
 5. Ketuk **Instal**. Jika Play Protect bertanya, pilih **Instal saja** / **Instal tanpa memindai**.
 
@@ -94,10 +94,10 @@ Untuk anggota rombongan yang tidak punya internet, kirim file APK dari HP yang s
 
 ## Apakah aman dipasang di luar Play Store?
 
-Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk aplikasi yang aman. Cara memastikan APK Saling Jaga bisa dipercaya:
+Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk aplikasi yang aman. Cara memastikan APK Growth Internal bisa dipercaya:
 
 - **Kodenya terbuka.** Semua kode ada di repositori ini dan bisa diperiksa siapa pun. Aplikasinya kecil (sekitar 200 KB) dan tidak memakai library pihak ketiga, jadi tidak ada kode tersembunyi dari SDK iklan atau analitik.
-- **APK dibangun oleh GitHub, bukan di laptop pribadi.** File di halaman [Releases](https://github.com/chalidade/saling-jaga/releases) dibuat otomatis oleh GitHub Actions dari kode publik. Setiap rilis mencantumkan commit asal dan link ke log build-nya.
+- **APK dibangun oleh GitHub, bukan di laptop pribadi.** File di halaman [Releases](https://github.com/nafta121/growth-internal/releases) dibuat otomatis oleh GitHub Actions dari kode publik. Setiap rilis mencantumkan commit asal dan link ke log build-nya.
 - **Cek keaslian file.** Setiap rilis mencantumkan SHA-256 APK dan sidik jari sertifikat penandatangan. File yang diunduh dari sumber lain (grup WhatsApp, Bluetooth) bisa dicocokkan dengan angka ini. File juga bisa dipindai gratis di [VirusTotal](https://www.virustotal.com).
 - **Tidak mengirim data ke internet.** Tidak ada server, akun, iklan, atau pelacak. Data hanya dikirim langsung ke HP anggota grup lewat Wi‑Fi Direct. Satu-satunya akses internet adalah saat kamu sendiri menekan **Unduh peta sekitar**: aplikasi mengambil gambar peta dari `tile.openstreetmap.org`, dan tidak ada data pribadi yang ikut terkirim.
 - **Izin seperlunya:**
@@ -110,7 +110,7 @@ Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk a
   | Internet / jaringan | Membuka koneksi TCP ke HP lain di grup, dan mengunduh gambar peta OpenStreetMap saat kamu menekan Unduh peta. Tidak ada server lain |
   | Getar, wake lock, layanan latar | Alarm SOS dan tetap tersambung saat layar mati |
 
-  Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto dan video dipilih lewat pemilih bawaan Android atau direkam lewat aplikasi kamera HP, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
+  Growth Internal **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto dan video dipilih lewat pemilih bawaan Android atau direkam lewat aplikasi kamera HP, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
 
 ## Cara pakai
 
@@ -178,7 +178,7 @@ Aplikasi ini sengaja dibangun **tanpa Gradle/AGP dan tanpa dependensi**, cukup d
 
 ```bash
 sudo apt-get install android-sdk-platform-23 aapt dalvik-exchange apksigner zipalign
-./build.sh            # hasil: build/saling-jaga-debug.apk
+./build.sh            # hasil: build/growth-internal-debug.apk
 ```
 
 Kodenya ditulis dalam Java 8 dengan UI yang dibangun langsung di kode (tanpa XML layout dan tanpa AndroidX). APK dikompilasi terhadap API 23 dengan `targetSdkVersion` 33. API Android 8+ seperti notification channel dipanggil lewat reflection.
@@ -198,7 +198,7 @@ cd tools/screenshot-tests && gradle test
 
 GitHub Actions:
 - `build.yml` menjalankan build dan kedua tes di setiap push dan PR, lalu mengunggah APK dan screenshot sebagai artefak.
-- `release.yml` membangun APK di setiap push ke `main` dan menaruhnya di GitHub Release `v<versionName>` sebagai `saling-jaga.apk`. Jika secret `SIGNING_KEYSTORE_B64` (keystore dalam base64), `SIGNING_KS_PASS`, `SIGNING_KEY_ALIAS`, dan `SIGNING_KEY_PASS` diisi, APK ditandatangani dengan kunci rilis. `versionCode` diisi otomatis dari nomor run (+100) supaya setiap rilis terpasang sebagai update.
+- `release.yml` membangun APK di setiap push ke `main` dan menaruhnya di GitHub Release `v<versionName>` sebagai `growth-internal.apk`. Jika secret `SIGNING_KEYSTORE_B64` (keystore dalam base64), `SIGNING_KS_PASS`, `SIGNING_KEY_ALIAS`, dan `SIGNING_KEY_PASS` diisi, APK ditandatangani dengan kunci rilis. `versionCode` diisi otomatis dari nomor run (+100) supaya setiap rilis terpasang sebagai update.
 - `pages.yml` menerbitkan folder `docs/` ke GitHub Pages (situs web proyek).
 
 ## Struktur proyek
@@ -234,8 +234,8 @@ docs/                      situs web (index.html), logo, splash, screenshot
 
 Sudah mencoba? Laporan dari HP asli adalah hal yang paling dibutuhkan sekarang.
 
-- **Lapor masalah** (gagal terhubung, suara putus, aplikasi tertutup): [buka formulir](https://github.com/chalidade/saling-jaga/issues/new?template=lapor-masalah.yml). Sebutkan merek HP dan versi Android.
-- **Usul fitur**: [buka formulir](https://github.com/chalidade/saling-jaga/issues/new?template=usul-fitur.yml).
+- **Lapor masalah** (gagal terhubung, suara putus, aplikasi tertutup): [buka formulir](https://github.com/nafta121/growth-internal/issues/new?template=lapor-masalah.yml). Sebutkan merek HP dan versi Android.
+- **Usul fitur**: [buka formulir](https://github.com/nafta121/growth-internal/issues/new?template=usul-fitur.yml).
 
 Jangan tulis nomor telepon atau data pribadi lain di laporan, karena laporan bisa dilihat publik.
 
@@ -250,14 +250,14 @@ Website memakai statistik pengunjung [GoatCounter](https://www.goatcounter.com) 
 
 ## Lisensi
 
-Saling Jaga memakai model **open-core**:
+Growth Internal memakai model **open-core**:
 
 - **Aplikasi warga** (repositori ini) berlisensi [GNU AGPL-3.0-or-later](LICENSE). Siapa pun boleh memakai,
   mempelajari, mengubah, dan membagikannya. Siapa pun yang membagikan atau menjalankan versi modifikasi
   wajib membuka kode sumbernya dengan lisensi yang sama.
 - **Edisi Posko / Tim** (dasbor koordinator, peta offline, absen massal, laporan, enkripsi tim)
   dikembangkan terpisah dengan lisensi komersial.
-- **Nama, logo, dan slogan "Saling Jaga"** adalah merek dan tidak termasuk dalam AGPL. Lihat
+- **Nama, logo, dan slogan "Growth Internal"** adalah merek dan tidak termasuk dalam AGPL. Lihat
   [TRADEMARK.md](TRADEMARK.md).
 
 Copyright (C) 2026 Chalid Ade Rahman

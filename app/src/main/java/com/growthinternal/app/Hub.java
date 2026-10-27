@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import java.io.IOException;
 import java.net.InetAddress;

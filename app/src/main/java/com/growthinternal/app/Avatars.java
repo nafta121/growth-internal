@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.content.ContentResolver;
 import android.graphics.Bitmap;
@@ -20,8 +20,8 @@ import java.io.InputStream;
 /** Round profile pictures: the member's photo, or their initial on a colour. */
 final class Avatars {
     private static final int[] PALETTE = {
-            Color.rgb(31, 122, 69), Color.rgb(37, 99, 235), Color.rgb(147, 51, 234),
-            Color.rgb(219, 39, 119), Color.rgb(234, 88, 12), Color.rgb(101, 163, 13),
+            Color.rgb(19, 31, 55), Color.rgb(214, 30, 32), Color.rgb(37, 99, 235),
+            Color.rgb(147, 51, 234), Color.rgb(234, 88, 12), Color.rgb(31, 122, 69),
     };
     static final int PHOTO_PX = 160;
 

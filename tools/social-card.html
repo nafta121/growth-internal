@@ -5,32 +5,32 @@
 <meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #FAFAF6; --paper: #F2F2EA; --ink: #13201A; --muted: #5F6B64; --line: #DEDFD6; --brand: #1C5233; --leaf: #2EA85C; --sos: #D93636; }
+  :root { --bg: #F4F6F9; --paper: #E8ECF2; --ink: #131F37; --muted: #626E7E; --line: #DEE3EB; --brand: #131F37; --leaf: #192D52; --sos: #D61E20; }
   * { box-sizing: border-box; margin: 0; }
   html, body { width: 1200px; height: 630px; overflow: hidden; }
   body {
     font-family: "Plus Jakarta Sans", sans-serif; color: var(--ink); position: relative;
     background:
-      radial-gradient(circle at 84% 48%, rgba(46,168,92,.20), transparent 42%),
-      radial-gradient(circle at 0% 100%, rgba(28,82,51,.08), transparent 40%),
+      radial-gradient(circle at 84% 48%, rgba(214,30,32,.14), transparent 42%),
+      radial-gradient(circle at 0% 100%, rgba(19,31,55,.08), transparent 40%),
       var(--bg);
   }
   /* concentric "signal" rings behind the phone */
   .rings { position: absolute; left: 1010px; top: 315px; }
-  .rings i { position: absolute; border: 2px solid rgba(28,82,51,.10); border-radius: 50%; transform: translate(-50%,-50%); }
+  .rings i { position: absolute; border: 2px solid rgba(19,31,55,.10); border-radius: 50%; transform: translate(-50%,-50%); }
   .copy { position: absolute; left: 72px; top: 64px; width: 640px; }
   .brand { display: flex; align-items: center; gap: 14px; font-weight: 800; font-size: 30px; color: var(--brand); }
   .brand img { width: 64px; }
   h1 { margin-top: 44px; font-size: 66px; line-height: 1.04; letter-spacing: -2.2px; font-weight: 800; }
-  h1 em { font-style: normal; color: var(--brand); }
+  h1 em { font-style: normal; color: var(--sos); }
   .lead { margin-top: 22px; font-size: 25px; line-height: 1.4; color: var(--muted); font-weight: 500; }
   .chips { position: absolute; left: 72px; bottom: 60px; display: flex; gap: 10px; }
   .chips span { padding: 9px 16px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-weight: 700; font-size: 19px; }
   .chips .sos { background: var(--sos); border-color: var(--sos); color: #fff; }
   .phone {
     position: absolute; left: 860px; top: 52px; width: 290px; height: 630px;
-    border-radius: 42px; background: #0F1A14; padding: 11px; transform: rotate(4deg);
-    box-shadow: 0 40px 70px -30px rgba(19,32,26,.55);
+    border-radius: 42px; background: #0C1322; padding: 11px; transform: rotate(4deg);
+    box-shadow: 0 40px 70px -30px rgba(19,31,55,.55);
   }
   .phone img { width: 100%; border-radius: 32px; display: block; }
   .play { display: none; }
@@ -46,7 +46,7 @@
   }
   html.poster .play b {
     width: 76px; height: 76px; border-radius: 50%; background: var(--brand); display: grid; place-items: center;
-    box-shadow: 0 14px 30px -12px rgba(28,82,51,.7);
+    box-shadow: 0 14px 30px -12px rgba(19,31,55,.7);
   }
   html.poster .play b::after { content: ""; margin-left: 6px; border-left: 24px solid #fff; border-top: 15px solid transparent; border-bottom: 15px solid transparent; }
   html.poster .play small { display: block; font-weight: 500; font-size: 18px; color: var(--muted); }
@@ -56,7 +56,7 @@
 <body>
   <div class="rings"><i style="width:360px;height:360px"></i><i style="width:560px;height:560px"></i><i style="width:760px;height:760px"></i></div>
   <div class="copy">
-    <div class="brand"><img src="../docs/brand/mark.png" alt="">Saling Jaga</div>
+    <div class="brand"><img src="../docs/brand/mark.png" alt="">Growth Internal</div>
     <h1>Tetap bisa saling kabar saat <em>sinyal hilang.</em></h1>
     <p class="lead">Telepon, walkie-talkie, chat, dan SOS antar HP Android, tanpa internet, pulsa, atau BTS.</p>
   </div>

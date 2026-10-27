@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.media.AudioFormat;
 import android.media.AudioManager;

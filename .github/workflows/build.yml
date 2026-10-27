@@ -27,8 +27,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: saling-jaga-debug-apk
-          path: build/saling-jaga-debug.apk
+          name: growth-internal-debug-apk
+          path: build/growth-internal-debug.apk
 
       - uses: gradle/actions/setup-gradle@v4
         with:

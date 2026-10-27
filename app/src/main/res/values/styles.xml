@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_dark">#FF1C5233</color>
+    <color name="brand_dark">#FF131F37</color>
     <style name="Splash" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/brand_dark</item>
         <item name="android:statusBarColor">@color/brand_dark</item>

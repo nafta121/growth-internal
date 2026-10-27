@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.Manifest;
 import android.app.Activity;
@@ -84,18 +84,18 @@ public class MainActivity extends Activity implements Hub.Callback {
     private static final int REQ_SEND_VIDEO = 6;
     private static final int VIDEO_SECONDS = 15;
 
-    // Saling Jaga palette: forest green, leaf green, warm cream.
-    private static final int BRAND = Color.rgb(28, 82, 51);
-    private static final int BG = Color.rgb(247, 247, 241);
+    // Growth Internal palette: navy (#131F37), crimson red (#D61E20), cool light surface.
+    private static final int BRAND = Color.rgb(19, 31, 55);
+    private static final int BG = Color.rgb(244, 246, 249);
     private static final int CARD = Color.WHITE;
-    private static final int LINE = Color.rgb(229, 231, 222);
-    private static final int TEXT = Color.rgb(28, 38, 31);
-    private static final int SUB = Color.rgb(104, 114, 106);
-    private static final int ACCENT = Color.rgb(31, 122, 69);
+    private static final int LINE = Color.rgb(222, 227, 235);
+    private static final int TEXT = Color.rgb(19, 31, 55);
+    private static final int SUB = Color.rgb(98, 110, 126);
+    private static final int ACCENT = Color.rgb(25, 45, 82);
     private static final int LEAF = Color.rgb(46, 168, 92);
-    private static final int ACCENT_SOFT = Color.rgb(226, 242, 231);
-    private static final int DANGER = Color.rgb(217, 54, 54);
-    private static final int DANGER_SOFT = Color.rgb(253, 236, 236);
+    private static final int ACCENT_SOFT = Color.rgb(228, 234, 245);
+    private static final int DANGER = Color.rgb(214, 30, 32);
+    private static final int DANGER_SOFT = Color.rgb(253, 234, 235);
     private static final int AMBER = Color.rgb(217, 140, 20);
     private static final int AMBER_SOFT = Color.rgb(254, 243, 219);
     private static final int AMBER_TEXT = Color.rgb(146, 84, 0);
@@ -183,7 +183,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         w.setStatusBarColor(BG);
         w.setNavigationBarColor(BG);
         w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        prefs = getSharedPreferences("salingjaga", MODE_PRIVATE);
+        prefs = getSharedPreferences("growthinternal", MODE_PRIVATE);
         if (state == null) clearClips();
         myName = prefs.getString("name", Build.MODEL);
         String p = prefs.getString("photo", null);
@@ -401,7 +401,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         logoLp.rightMargin = dp(10);
         header.addView(logo, logoLp);
         LinearLayout titles = column();
-        TextView brand = text("Saling Jaga", 19, BRAND, true);
+        TextView brand = text("Growth Internal", 19, BRAND, true);
         brand.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         titles.addView(brand);
         LinearLayout pill = row();

@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -21,7 +21,7 @@ final class Tiles {
     static final int MAX_ZOOM = 16;
     static final double RADIUS_KM = 3;
     static final int MAX_DETAILED = 240;   // tiles at zoom >= 13
-    static final String USER_AGENT = "SalingJaga/1 (+https://github.com/chalidade/saling-jaga)";
+    static final String USER_AGENT = "GrowthInternal/1 (+https://github.com/nafta121/growth-internal)";
 
     private Tiles() { }
 

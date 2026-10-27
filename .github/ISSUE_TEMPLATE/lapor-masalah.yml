@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Terima kasih sudah mencoba Saling Jaga. Masalah Wi‑Fi Direct sering bergantung pada merek HP, jadi data perangkat sangat membantu.
+        Terima kasih sudah mencoba Growth Internal. Masalah Wi‑Fi Direct sering bergantung pada merek HP, jadi data perangkat sangat membantu.
         Jangan tulis nomor telepon, alamat, atau data pribadi lain di sini, karena laporan ini bisa dilihat publik.
   - type: textarea
     id: apa
@@ -38,7 +38,7 @@ body:
   - type: input
     id: versi
     attributes:
-      label: Versi Saling Jaga
+      label: Versi Growth Internal
       description: Ada di menu profil atau nama file APK.
       placeholder: "0.10.0"
   - type: input

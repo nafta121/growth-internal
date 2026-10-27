@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.content.ContentResolver;
 import android.graphics.Bitmap;

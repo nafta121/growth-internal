@@ -1,7 +1,7 @@
 name: Release APK
 
 # Every push to main publishes the APK to the GitHub Release for the current versionName,
-# so README and the website can link to .../releases/latest/download/saling-jaga.apk.
+# so README and the website can link to .../releases/latest/download/growth-internal.apk.
 on:
   push:
     branches: [main]
@@ -50,7 +50,7 @@ jobs:
           # Strictly increasing per release run, so phones install each APK as an update.
           export VERSION_CODE=$(( ${{ github.run_number }} + 100 ))
           ./build.sh
-          cp build/saling-jaga-debug.apk build/saling-jaga.apk
+          cp build/growth-internal-debug.apk build/growth-internal.apk
 
       - name: Publish release
         env:
@@ -59,15 +59,15 @@ jobs:
           VERSION=$(grep -o 'android:versionName="[^"]*"' app/src/main/AndroidManifest.xml | cut -d'"' -f2)
           TAG="v$VERSION"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "Saling Jaga $VERSION" --latest \
-              --notes "APK Saling Jaga $VERSION untuk Android 6.0 ke atas. Unduh **saling-jaga.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP."
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Growth Internal $VERSION" --latest \
+              --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP."
           fi
-          (cd build && sha256sum saling-jaga.apk > saling-jaga.apk.sha256)
-          SHA=$(cut -d' ' -f1 build/saling-jaga.apk.sha256)
-          VC=$(aapt dump badging build/saling-jaga.apk | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
-          CERT=$(apksigner verify --print-certs build/saling-jaga.apk | grep -m1 'SHA-256 digest' | sed 's/.*: //')
-          gh release upload "$TAG" build/saling-jaga.apk build/saling-jaga.apk.sha256 --clobber
-          gh release edit "$TAG" --notes "APK Saling Jaga $VERSION untuk Android 6.0 ke atas. Unduh **saling-jaga.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP.
+          (cd build && sha256sum growth-internal.apk > growth-internal.apk.sha256)
+          SHA=$(cut -d' ' -f1 build/growth-internal.apk.sha256)
+          VC=$(aapt dump badging build/growth-internal.apk | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          CERT=$(apksigner verify --print-certs build/growth-internal.apk | grep -m1 'SHA-256 digest' | sed 's/.*: //')
+          gh release upload "$TAG" build/growth-internal.apk build/growth-internal.apk.sha256 --clobber
+          gh release edit "$TAG" --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP.
 
           ### Cek keaslian file
           - Versi build (versionCode): $VC

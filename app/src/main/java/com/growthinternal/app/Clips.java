@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;

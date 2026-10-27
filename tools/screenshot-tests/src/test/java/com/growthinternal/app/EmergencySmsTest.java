@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -19,14 +19,14 @@ public class EmergencySmsTest {
     }
 
     @Test public void bodyWithLocation() {
-        assertEquals("SOS dari Sari (Saling Jaga). Saya butuh bantuan. "
+        assertEquals("SOS dari Sari (Growth Internal). Saya butuh bantuan. "
                         + "Lokasi: https://maps.google.com/?q=-6.200000,106.816666 (akurasi 12 m, 4 menit lalu). Baterai 21%.",
                 EmergencySms.body("Sari", true, -6.2, 106.816666, 12.4f, 4, 21));
     }
 
     @Test public void bodyWithoutLocation() {
         String b = EmergencySms.body("Budi", false, 0, 0, 0, -1, -1);
-        assertEquals("SOS dari Budi (Saling Jaga). Saya butuh bantuan. Lokasi GPS belum tersedia.", b);
+        assertEquals("SOS dari Budi (Growth Internal). Saya butuh bantuan. Lokasi GPS belum tersedia.", b);
         assertTrue(EmergencySms.body("Budi", true, 1, 2, 0, 0, 50).endsWith("q=1.000000,2.000000. Baterai 50%."));
     }
 }

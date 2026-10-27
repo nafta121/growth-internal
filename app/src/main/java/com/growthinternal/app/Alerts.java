@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -59,7 +59,7 @@ final class Alerts {
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT | 0x04000000; // FLAG_IMMUTABLE
         b.setSmallIcon(R.drawable.ic_mic)
-                .setColor(Color.rgb(28, 82, 51))
+                .setColor(Color.rgb(19, 31, 55))
                 .setContentIntent(PendingIntent.getActivity(c, 0, open, flags))
                 .setShowWhen(true);
         return b;

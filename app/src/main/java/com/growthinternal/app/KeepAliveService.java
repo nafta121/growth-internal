@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.app.Notification;
 import android.app.Service;
@@ -34,7 +34,7 @@ public class KeepAliveService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String text = intent == null ? null : intent.getStringExtra(EXTRA_TEXT);
         Notification n = Alerts.builder(this, Alerts.CH_STATUS)
-                .setContentTitle("Saling Jaga aktif")
+                .setContentTitle("Growth Internal aktif")
                 .setContentText(text == null ? "Tersambung ke grup" : text)
                 .setOngoing(true)
                 .setPriority(Notification.PRIORITY_LOW)
@@ -42,12 +42,12 @@ public class KeepAliveService extends Service {
         startForeground(Alerts.ID_ONGOING, n);
         if (wake == null) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "salingjaga:group");
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "growthinternal:group");
             wake.acquire();
         }
         if (wifi == null) {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "salingjaga:group");
+            wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "growthinternal:group");
             wifi.acquire();
         }
         return START_NOT_STICKY;

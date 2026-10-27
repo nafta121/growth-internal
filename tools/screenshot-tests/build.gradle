@@ -1,4 +1,4 @@
-// JVM tests for Saling Jaga: real-socket tests of the group protocol (HubTest) and
+// JVM tests for Growth Internal: real-socket tests of the group protocol (HubTest) and
 // screenshots of the UI rendered with Robolectric native graphics (ScreenshotTest).
 // Run ./build.sh at the repo root first, then: gradle test  (screenshots land in out/)
 plugins { id 'java' }
@@ -41,7 +41,7 @@ task testConfig {
         out.text = """android_resource_apk=${new File(repoRoot, 'build/unsigned.apk').absolutePath}
 android_merged_manifest=${new File(repoRoot, 'app/src/main/AndroidManifest.xml').absolutePath}
 android_merged_assets=${file("$buildDir/empty-assets").absolutePath}
-android_custom_package=com.salingjaga.app
+android_custom_package=com.growthinternal.app
 """
         file("$buildDir/empty-assets").mkdirs()
     }

@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -84,7 +84,7 @@ public class ScreenshotTest {
 
     static void freshInstall() {
         org.robolectric.RuntimeEnvironment.getApplication()
-                .getSharedPreferences("salingjaga", 0).edit().clear().commit();
+                .getSharedPreferences("growthinternal", 0).edit().clear().commit();
     }
 
     MainActivity start() throws Exception {
@@ -188,7 +188,7 @@ public class ScreenshotTest {
         ((android.widget.EditText) findEdit(ann.getWindow().getDecorView()))
                 .setText("Semua kumpul di lapangan SD 2 sebelum jam 5 sore.");
         snapDialog(d, "10-tulis-pengumuman");
-        a.getSharedPreferences("salingjaga", 0).edit().putString("sms_contacts", "081234567890,081398765432").apply();
+        a.getSharedPreferences("growthinternal", 0).edit().putString("sms_contacts", "081234567890,081398765432").apply();
         call(d, "showProfileMenu", new Class<?>[0]);
         snapDialog(d, "11-menu-profil");
         call(d, "askEmergencyContacts", new Class<?>[] {Runnable.class}, (Object) null);

@@ -1,4 +1,4 @@
-package com.salingjaga.app;
+package com.growthinternal.app;
 
 /** One message on the wire: type + original sender name + payload. */
 final class Frame {
