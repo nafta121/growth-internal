@@ -219,6 +219,115 @@ public class ScreenshotTest {
         v.onText("Sari", "Ini 10 detik lalu. Arus deras, jangan lewat sini.");
         ShadowLooper.idleMainLooper();
         snap(v, "15-kirim-video");
+
+        MainActivity p = group();
+        set(p, "myLocation", me);
+        writeSampleTiles(new java.io.File(p.getFilesDir(), "tiles"), -6.2000, 106.8166);
+        p.onPresence("Budi", presence(Presence.SAFE, 78, -6.19780, 106.81720));
+        p.onPresence("Sari", presence(Presence.SOS, 21, -6.19850, 106.81480));
+        p.onPresence("Pak RT", presence(Presence.SAFE, 91, -6.20310, 106.81950));
+        call(p, "showMap", new Class<?>[0]);
+        ShadowLooper.idleMainLooper();
+        MapView mv = (MapView) get(p, "mapView");
+        set(mv, "zoom", 16.2);
+        mv.centerOn(-6.2003, 106.8170);
+        snap(p, "16-peta-offline");
+
+        MainActivity j = group();
+        set(j, "upstreamInfo", Bridge.encode("DIRECT-xy-Pak RT", "rahasia123", "fe80::1"));
+        call(j, "askBridge", new Class<?>[0]);
+        snapDialog(j, "17-jadi-jembatan");
+    }
+
+    /**
+     * Drawn street tiles standing in for downloaded OpenStreetMap tiles (the test has
+     * no internet). Roads follow a world grid so neighbouring tiles line up.
+     */
+    static void writeSampleTiles(java.io.File root, double lat, double lon) throws Exception {
+        for (int z = 14; z <= 16; z++) {
+            int cx = (int) Tiles.lonToX(lon, z), cy = (int) Tiles.latToY(lat, z);
+            int r = z == 16 ? 3 : 2;
+            for (int x = cx - r; x <= cx + r; x++) {
+                for (int y = cy - r; y <= cy + r; y++) {
+                    java.io.File f = Tiles.file(root, z, x, y);
+                    f.getParentFile().mkdirs();
+                    java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+                    sampleTile(z, x, y).compress(Bitmap.CompressFormat.PNG, 100, out);
+                    out.close();
+                }
+            }
+        }
+    }
+
+    static Bitmap sampleTile(int z, int tx, int ty) {
+        Bitmap b = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        c.drawColor(0xFFF2EFE9);
+        double k = Math.pow(2, 16 - z);              // world pixels at zoom 16 per pixel here
+        double ox = tx * 256 * k, oy = ty * 256 * k;
+        // Blocks, parks and buildings on a 160 px grid at zoom 16.
+        int g = 160;
+        for (long bx = (long) Math.floor(ox / g) - 1; bx * g < ox + 256 * k + g; bx++) {
+            for (long by = (long) Math.floor(oy / g) - 1; by * g < oy + 256 * k + g; by++) {
+                long h = (bx * 73856093L) ^ (by * 19349663L);
+                float l = (float) ((bx * g - ox) / k), t = (float) ((by * g - oy) / k);
+                float s = (float) (g / k);
+                if (Math.floorMod(h, 7) == 0) {
+                    p.setColor(0xFFCDEBC0);
+                    c.drawRect(l + 4 / (float) k, t + 4 / (float) k, l + s - 4 / (float) k, t + s - 4 / (float) k, p);
+                } else if (z >= 15) {
+                    p.setColor(0xFFDFD8CE);
+                    for (int i = 0; i < 4; i++) {
+                        float bl = l + s * (0.12f + 0.42f * (i % 2)), bt = t + s * (0.12f + 0.42f * (i / 2));
+                        c.drawRect(bl, bt, bl + s * 0.32f, bt + s * 0.32f, p);
+                    }
+                }
+            }
+        }
+        // River.
+        p.setStyle(android.graphics.Paint.Style.STROKE);
+        p.setColor(0xFFAAD3DF);
+        p.setStrokeWidth((float) (34 / k) + 2);
+        android.graphics.Path river = new android.graphics.Path();
+        for (int i = -10; i <= 266; i += 4) {
+            double wx = ox + i * k;
+            double wy = 17550000 + 260 * Math.sin(wx / 900.0) + (wx - 13460000) * 0.35;
+            float px = i, py = (float) ((wy - oy) / k);
+            if (i == -10) river.moveTo(px, py); else river.lineTo(px, py);
+        }
+        c.drawPath(river, p);
+        // Roads: minor every grid line, main every fourth.
+        for (int pass = 0; pass < 2; pass++) {
+            for (long gx = (long) Math.floor(ox / g); gx * g <= ox + 256 * k; gx++) {
+                boolean main = Math.floorMod(gx, 4) == 0;
+                if (!main && z < 15) continue;
+                float x = (float) ((gx * g - ox) / k);
+                road(c, p, pass, main, k, x, -2, x, 258);
+            }
+            for (long gy = (long) Math.floor(oy / g); gy * g <= oy + 256 * k; gy++) {
+                boolean main = Math.floorMod(gy, 4) == 0;
+                if (!main && z < 15) continue;
+                float y = (float) ((gy * g - oy) / k);
+                road(c, p, pass, main, k, -2, y, 258, y);
+            }
+        }
+        return b;
+    }
+
+    static void road(Canvas c, android.graphics.Paint p, int pass, boolean main, double k,
+            float x0, float y0, float x1, float y1) {
+        float w = (float) ((main ? 22 : 12) / k) + 1;
+        p.setStyle(android.graphics.Paint.Style.STROKE);
+        p.setStrokeCap(android.graphics.Paint.Cap.BUTT);
+        if (pass == 0) {
+            p.setColor(main ? 0xFFE0B470 : 0xFFD0CBC2);
+            p.setStrokeWidth(w + 2);
+        } else {
+            p.setColor(main ? 0xFFFCD68A : 0xFFFFFFFF);
+            p.setStrokeWidth(w);
+        }
+        c.drawLine(x0, y0, x1, y1, p);
     }
 
     /** A simple drawn street scene standing in for a phone photo. */
