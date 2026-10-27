@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/brand/logo-wordmark.png" alt="Saling Jaga" width="240">
+  <img src="docs/brand/logo-wordmark-transparent.png" alt="Saling Jaga" width="220">
 </p>
 
 <p align="center"><b>Connecting in Crisis</b>: telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal.</p>
