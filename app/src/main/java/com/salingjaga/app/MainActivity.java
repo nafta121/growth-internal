@@ -153,7 +153,11 @@ public class MainActivity extends Activity implements Hub.Callback {
     private TextView sosChip, statusChip, sosTitle, sosDetail, sosSilence;
     private View statusDot, nearbyCard, groupCard, talkBanner, alertBanner, sosCard;
     private ImageView myAvatar, talkAvatar, callIcon, speakerIcon, sosAvatar;
-    private LinearLayout peerList, memberRow, chatList;
+    private LinearLayout peerList, memberRow, chatList, memberStrip;
+    private View memberScroll;
+    private ImageView groupChevron;
+    private TextView groupTitle;
+    private boolean groupOpen;
     private ScrollView chatScroll;
     private EditText input;
     private FrameLayout pttButton, callButton, speakerButton;
@@ -371,17 +375,17 @@ public class MainActivity extends Activity implements Hub.Callback {
     private View buildUi() {
         LinearLayout root = column();
         root.setBackgroundColor(BG);
-        root.setPadding(dp(16), dp(10), dp(16), dp(12));
+        root.setPadding(dp(14), dp(6), dp(14), dp(6));
 
         // Header: title, status pill, own avatar.
         LinearLayout header = row();
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.logo_small);
-        LinearLayout.LayoutParams logoLp = lp(dp(44), dp(44));
+        LinearLayout.LayoutParams logoLp = lp(dp(36), dp(36));
         logoLp.rightMargin = dp(10);
         header.addView(logo, logoLp);
         LinearLayout titles = column();
-        TextView brand = text("Saling Jaga", 22, BRAND, true);
+        TextView brand = text("Saling Jaga", 19, BRAND, true);
         brand.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         titles.addView(brand);
         LinearLayout pill = row();
@@ -389,25 +393,25 @@ public class MainActivity extends Activity implements Hub.Callback {
         LinearLayout.LayoutParams dotLp = lp(dp(8), dp(8));
         dotLp.rightMargin = dp(6);
         pill.addView(statusDot, dotLp);
-        statusText = text("", 13, SUB, false);
+        statusText = text("", 12, SUB, false);
         pill.addView(statusText);
-        titles.addView(pill, gapTop(wrap(), 2));
+        titles.addView(pill, wrap());
         header.addView(titles, grow());
         myAvatar = new ImageView(this);
         myAvatar.setBackground(pressable(oval(Color.TRANSPARENT)));
         myAvatar.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showProfileMenu(); }
         });
-        header.addView(myAvatar, lp(dp(44), dp(44)));
+        header.addView(myAvatar, lp(dp(38), dp(38)));
         root.addView(header, fill());
 
         // Alert banner (someone left / connection lost).
         alertBanner = buildBanner();
-        root.addView(alertBanner, gapTop(fill(), 12));
+        root.addView(alertBanner, gapTop(fill(), 8));
 
         // Incoming SOS: stays until the sender cancels it.
         sosCard = buildSosCard();
-        root.addView(sosCard, gapTop(fill(), 12));
+        root.addView(sosCard, gapTop(fill(), 8));
 
         // Nearby devices card (before joining a group).
         LinearLayout nearby = card();
@@ -432,14 +436,28 @@ public class MainActivity extends Activity implements Hub.Callback {
         nearby.addView(peerScroll, gapTop(lp(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT), 4));
         nearbyCard = nearby;
-        root.addView(nearby, gapTop(fill(), 12));
+        root.addView(nearby, gapTop(fill(), 8));
 
-        // Group card (after joining).
+        // Group card (after joining). Folds to one line so the chat gets the room.
         LinearLayout group = card();
+        group.setPadding(dp(12), dp(8), dp(12), dp(8));
         LinearLayout gh = row();
-        gh.addView(text("Grup", 16, TEXT, true), grow());
-        TextView leave = text("Keluar", 14, DANGER, true);
-        leave.setPadding(dp(10), dp(6), dp(10), dp(6));
+        gh.setBackground(pressable(shape(Color.TRANSPARENT, 12, 0)));
+        gh.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { setGroupOpen(!groupOpen); }
+        });
+        groupTitle = text("Grup", 15, TEXT, true);
+        gh.addView(groupTitle, wrap());
+        memberStrip = row();
+        LinearLayout.LayoutParams msl = grow();
+        msl.leftMargin = dp(10);
+        gh.addView(memberStrip, msl);
+        groupChevron = icon(R.drawable.ic_expand, SUB, 22);
+        LinearLayout.LayoutParams chl = lp(dp(22), dp(22));
+        chl.rightMargin = dp(8);
+        gh.addView(groupChevron, chl);
+        TextView leave = text("Keluar", 13, DANGER, true);
+        leave.setPadding(dp(10), dp(5), dp(10), dp(5));
         leave.setBackground(pressable(shape(DANGER_SOFT, 14, 0)));
         leave.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { disconnect(); }
@@ -450,9 +468,11 @@ public class MainActivity extends Activity implements Hub.Callback {
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
         hs.addView(memberRow);
-        group.addView(hs, gapTop(fill(), 10));
+        memberScroll = hs;
+        group.addView(hs, gapTop(fill(), 8));
         groupCard = group;
-        root.addView(group, gapTop(fill(), 12));
+        root.addView(group, gapTop(fill(), 8));
+        setGroupOpen(prefs.getBoolean("group_open", false));
 
         // Who is talking now.
         LinearLayout talk = row();
@@ -465,7 +485,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ttl.leftMargin = dp(12);
         talk.addView(talkText, ttl);
         talkBanner = talk;
-        root.addView(talk, gapTop(fill(), 12));
+        root.addView(talk, gapTop(fill(), 8));
 
         // Disaster actions: SOS, own safety status, announcement to everyone.
         LinearLayout chips = row();
@@ -498,7 +518,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         HorizontalScrollView chipScroll = new HorizontalScrollView(this);
         chipScroll.setHorizontalScrollBarEnabled(false);
         chipScroll.addView(chips);
-        root.addView(chipScroll, gapTop(fill(), 12));
+        root.addView(chipScroll, gapTop(fill(), 8));
 
         // Chat.
         chatScroll = new ScrollView(this);
@@ -508,18 +528,18 @@ public class MainActivity extends Activity implements Hub.Callback {
         chatScroll.addView(chatList);
         LinearLayout.LayoutParams chatLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1);
-        chatLp.topMargin = dp(8);
+        chatLp.topMargin = dp(2);
         root.addView(chatScroll, chatLp);
 
         // Message input.
         LinearLayout inputRow = row();
-        FrameLayout photo = roundButton(46, CARD, icon(R.drawable.ic_image, ACCENT, 22));
+        FrameLayout photo = roundButton(42, CARD, icon(R.drawable.ic_image, ACCENT, 20));
         photo.setElevation(0);
         photo.setBackground(pressable(ovalStroke(CARD, LINE)));
         photo.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { askPhotoSource(); }
         });
-        LinearLayout.LayoutParams pl = lp(dp(46), dp(46));
+        LinearLayout.LayoutParams pl = lp(dp(42), dp(42));
         pl.rightMargin = dp(8);
         inputRow.addView(photo, pl);
         input = new EditText(this);
@@ -528,7 +548,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         input.setTextColor(TEXT);
         input.setHintTextColor(SUB);
         input.setBackground(shape(CARD, 24, LINE));
-        input.setPadding(dp(18), dp(12), dp(18), dp(12));
+        input.setPadding(dp(16), dp(10), dp(16), dp(10));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
         input.setOnEditorActionListener(new TextView.OnEditorActionListener() {
@@ -538,12 +558,12 @@ public class MainActivity extends Activity implements Hub.Callback {
             }
         });
         inputRow.addView(input, grow());
-        FrameLayout send = roundButton(46, ACCENT, icon(R.drawable.ic_send, Color.WHITE, 20));
+        FrameLayout send = roundButton(42, ACCENT, icon(R.drawable.ic_send, Color.WHITE, 18));
         send.setElevation(0);
         send.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { sendText(); }
         });
-        LinearLayout.LayoutParams sl = lp(dp(46), dp(46));
+        LinearLayout.LayoutParams sl = lp(dp(42), dp(42));
         sl.leftMargin = dp(8);
         inputRow.addView(send, sl);
         root.addView(inputRow, gapTop(fill(), 4));
@@ -551,13 +571,13 @@ public class MainActivity extends Activity implements Hub.Callback {
         // Voice controls: call mode, push-to-talk, speaker.
         LinearLayout controls = row();
         controls.setGravity(Gravity.CENTER);
-        callIcon = icon(R.drawable.ic_call, ACCENT, 24);
-        callButton = roundButton(56, CARD, callIcon);
+        callIcon = icon(R.drawable.ic_call, ACCENT, 20);
+        callButton = roundButton(44, CARD, callIcon);
         callButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggleCallMode(); }
         });
-        pttButton = roundButton(84, ACCENT, icon(R.drawable.ic_mic, Color.WHITE, 36));
-        pttButton.setElevation(dp(6));
+        pttButton = roundButton(60, ACCENT, icon(R.drawable.ic_mic, Color.WHITE, 28));
+        pttButton.setElevation(dp(4));
         pttButton.setOnTouchListener(new View.OnTouchListener() {
             @Override public boolean onTouch(View v, MotionEvent e) {
                 if (callMode) return false;
@@ -572,8 +592,8 @@ public class MainActivity extends Activity implements Hub.Callback {
                 return true;
             }
         });
-        speakerIcon = icon(R.drawable.ic_volume, ACCENT, 24);
-        speakerButton = roundButton(56, CARD, speakerIcon);
+        speakerIcon = icon(R.drawable.ic_volume, ACCENT, 20);
+        speakerButton = roundButton(44, CARD, speakerIcon);
         speakerButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 speakerOn = !speakerOn;
@@ -581,24 +601,24 @@ public class MainActivity extends Activity implements Hub.Callback {
                 refreshControls();
             }
         });
-        LinearLayout.LayoutParams side = lp(dp(56), dp(56));
-        LinearLayout.LayoutParams mid = lp(dp(84), dp(84));
+        LinearLayout.LayoutParams side = lp(dp(44), dp(44));
+        LinearLayout.LayoutParams mid = lp(dp(60), dp(60));
         mid.leftMargin = dp(28);
         mid.rightMargin = dp(28);
         controls.addView(callButton, side);
         controls.addView(pttButton, mid);
         controls.addView(speakerButton, side);
-        root.addView(controls, gapTop(fill(), 14));
-        pttLabel = text("", 13, SUB, false);
+        root.addView(controls, gapTop(fill(), 8));
+        pttLabel = text("", 12, SUB, false);
         pttLabel.setGravity(Gravity.CENTER);
-        root.addView(pttLabel, gapTop(fill(), 6));
+        root.addView(pttLabel, gapTop(fill(), 2));
         return root;
     }
 
     private TextView chip(String label, int fg, int bg) {
-        TextView t = text(label, 14, fg, true);
+        TextView t = text(label, 13, fg, true);
         t.setSingleLine(true);
-        t.setPadding(dp(14), dp(8), dp(14), dp(8));
+        t.setPadding(dp(12), dp(6), dp(12), dp(6));
         t.setBackground(pressable(shape(bg, 18, bg == CARD ? LINE : 0)));
         return t;
     }
@@ -722,11 +742,48 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void refreshMembers() {
         memberRow.removeAllViews();
+        memberStrip.removeAllViews();
         addMemberChip("Kamu", myName, myPhoto, false, buildPresence());
+        addMiniAvatar(myName, myPhoto, false, buildPresence());
+        int shown = 1;
         for (Map.Entry<String, byte[]> e : members.entrySet()) {
-            addMemberChip(e.getKey(), e.getKey(), e.getValue(), talkers.contains(e.getKey()),
-                    presences.get(e.getKey()));
+            boolean talking = talkers.contains(e.getKey());
+            Presence pr = presences.get(e.getKey());
+            addMemberChip(e.getKey(), e.getKey(), e.getValue(), talking, pr);
+            if (shown < 5) addMiniAvatar(e.getKey(), e.getValue(), talking, pr);
+            shown++;
         }
+        if (shown > 5) {
+            TextView more = text("+" + (shown - 5), 12, SUB, true);
+            LinearLayout.LayoutParams l = wrap();
+            l.leftMargin = dp(4);
+            memberStrip.addView(more, l);
+        }
+        groupTitle.setText("Grup · " + shown);
+    }
+
+    /** Small face for the folded group card; the ring shows status, green while talking. */
+    private void addMiniAvatar(String name, byte[] photo, boolean talking, Presence pr) {
+        FrameLayout ring = new FrameLayout(this);
+        int pad = dp(2);
+        ring.setPadding(pad, pad, pad, pad);
+        int status = pr == null ? Presence.UNSET : pr.status;
+        int color = talking ? LEAF : status == Presence.UNSET ? LINE : statusColor(status);
+        ring.setBackground(oval(color));
+        ImageView a = avatar(name, photo, 26);
+        a.setLayoutParams(new FrameLayout.LayoutParams(dp(26), dp(26)));
+        ring.addView(a);
+        LinearLayout.LayoutParams l = wrap();
+        l.rightMargin = dp(4);
+        memberStrip.addView(ring, l);
+    }
+
+    private void setGroupOpen(boolean open) {
+        groupOpen = open;
+        memberScroll.setVisibility(open ? View.VISIBLE : View.GONE);
+        memberStrip.setVisibility(open ? View.INVISIBLE : View.VISIBLE);
+        groupChevron.setRotation(open ? 180 : 0);
+        prefs.edit().putBoolean("group_open", open).apply();
     }
 
     private static int statusColor(int status) {
@@ -834,7 +891,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         img.setBackground(shape(LINE, 12, 0));
         img.setClipToOutline(true);
         int w = (int) (getResources().getDisplayMetrics().widthPixels * 0.62f);
-        int h = Math.min(w * 4 / 3, Math.round(w * (float) thumb.getHeight() / thumb.getWidth()));
+        int h = Math.min(w, Math.round(w * (float) thumb.getHeight() / thumb.getWidth()));
         img.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showPhoto(jpeg); }
         });
