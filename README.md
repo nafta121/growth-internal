@@ -23,7 +23,7 @@ Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang pali
 
 Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan perusahaan menjadi dasar model bisnisnya (lihat [Model keberlanjutan](#model-keberlanjutan)).
 
-> **Status:** MVP v0.8.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
+> **Status:** MVP v0.8.1. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
 
 ## Tampilan
 
@@ -121,7 +121,7 @@ Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk a
    - **Kompas**: arah dan jarak ke tiap anggota.
    - **Status**: Aman / Butuh bantuan / Terluka.
    - **Pengumuman**: kartu kuning untuk info penting, misalnya titik kumpul.
-6. Ketuk foto profil di kanan atas untuk mengganti foto/nama atau mematikan **Bagikan lokasi**. Ketuk **Keluar** di kartu Grup untuk meninggalkan grup.
+6. Ketuk foto profil di kanan atas untuk mengganti foto/nama atau mematikan **Bagikan lokasi**. Kartu Grup terlipat agar chat lebih lega; ketuk kartunya untuk melihat status dan baterai tiap anggota. Ketuk **Keluar** untuk meninggalkan grup.
 
 Jangkauan Wi‑Fi Direct biasanya 50–100 m di area terbuka dan lebih pendek di dalam gedung. Kunci GPS pertama tanpa internet bisa butuh 1–3 menit di tempat terbuka.
 
