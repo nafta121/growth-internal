@@ -1,0 +1,262 @@
+package com.salingjaga.app;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * Holds the connections of one Wi-Fi Direct group. The group owner runs a server
+ * and relays every frame to the other members, so a group works like a
+ * walkie-talkie channel; with two phones it is a 1-to-1 call.
+ */
+final class Hub implements Link.Listener {
+    interface Callback {
+        void onStatus(String message);
+        void onMemberJoined(String name, byte[] photo);
+        void onMemberLeft(String name);
+        void onText(String from, String text);
+        void onAudio(String from, byte[] pcm);
+        void onTalkState(String from, boolean talking);
+        void onPresence(String from, byte[] presence);
+        void onAnnouncement(String from, String text);
+        void onRejected(String reason);
+    }
+
+    static final int PORT = 8988;
+    static final int MAX_LINKS = 16;
+    static final Charset UTF8 = Charset.forName("UTF-8");
+
+    private final Callback cb;
+    private final List<Link> links = new CopyOnWriteArrayList<Link>();
+    private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
+    // Latest PRESENCE payload per member, replayed by the owner to phones that join later.
+    private final Map<String, byte[]> presences = new LinkedHashMap<String, byte[]>();
+    private volatile byte[] myPresence;
+    private final String myName;
+    private final byte[] myPhoto;
+    private volatile boolean stopped;
+    private volatile boolean owner;
+    private ServerSocket server;
+
+    Hub(String myName, byte[] myPhoto, Callback cb) {
+        this.myName = myName;
+        this.myPhoto = myPhoto;
+        this.cb = cb;
+    }
+
+    boolean hasPeers() { return !links.isEmpty(); }
+
+    /**
+     * Listens only on the Wi-Fi Direct group address, so phones on another network
+     * the device is joined to (a café Wi-Fi, a hotspot) cannot reach the server.
+     */
+    void startServer(final InetAddress groupAddress) {
+        owner = true;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    ServerSocket s = new ServerSocket();
+                    s.setReuseAddress(true);
+                    s.bind(new InetSocketAddress(groupAddress, PORT));
+                    synchronized (Hub.this) {
+                        if (stopped) { s.close(); return; }
+                        server = s;
+                    }
+                    cb.onStatus("Menunggu anggota bergabung");
+                    while (!stopped) {
+                        Socket c = s.accept();
+                        if (links.size() >= MAX_LINKS) {
+                            c.close();
+                            continue;
+                        }
+                        addLink(c);
+                    }
+                } catch (IOException e) {
+                    if (!stopped) cb.onStatus("Server berhenti: " + e.getMessage());
+                }
+            }
+        }, "hub-server").start();
+    }
+
+    void startClient(final InetAddress host) {
+        owner = false;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                for (int attempt = 0; attempt < 15 && !stopped; attempt++) {
+                    try {
+                        Socket s = new Socket();
+                        s.connect(new InetSocketAddress(host, PORT), 4000);
+                        addLink(s);
+                        return;
+                    } catch (IOException e) {
+                        try { Thread.sleep(1000); } catch (InterruptedException ie) { return; }
+                    }
+                }
+                if (!stopped) cb.onStatus("Gagal tersambung ke pemilik grup");
+            }
+        }, "hub-client").start();
+    }
+
+    private void addLink(Socket s) throws IOException {
+        if (stopped) { s.close(); return; }
+        Link link = new Link(s, this);
+        links.add(link);
+        link.start();
+        link.send(new Frame(Frame.HELLO, myName, myPhoto));
+        byte[] p = myPresence;
+        if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
+    }
+
+    void sendPresence(byte[] presence) {
+        myPresence = presence;
+        broadcast(new Frame(Frame.PRESENCE, myName, presence), null);
+    }
+
+    void sendAnnouncement(String text) {
+        broadcast(new Frame(Frame.ANNOUNCE, myName, text.getBytes(UTF8)), null);
+    }
+
+    void sendText(String text) {
+        broadcast(new Frame(Frame.TEXT, myName, text.getBytes(UTF8)), null);
+    }
+
+    void sendAudio(byte[] pcm) {
+        broadcast(new Frame(Frame.AUDIO, myName, pcm), null);
+    }
+
+    void sendTalkState(boolean talking) {
+        broadcast(new Frame(talking ? Frame.TALK_START : Frame.TALK_END, myName, null), null);
+    }
+
+    private void broadcast(Frame f, Link except) {
+        for (Link l : links) {
+            if (l != except) l.send(f);
+        }
+    }
+
+    @Override public void onFrame(Link from, Frame f) {
+        if (f.type == Frame.HELLO) {
+            // The first HELLO on a link names the phone at the other end; a client
+            // later receives relayed HELLOs of the other members over the same link.
+            if (from.peerName == null) {
+                if (owner && nameTaken(f.sender)) {
+                    from.send(new Frame(Frame.REJECT, myName,
+                            ("Nama \"" + f.sender + "\" sudah dipakai di grup ini. Ganti nama lalu sambung lagi.")
+                                    .getBytes(UTF8)));
+                    return;
+                }
+                from.peerName = f.sender;
+                from.peerPhoto = f.payload;
+                if (owner) {
+                    for (Link l : links) {
+                        if (l != from && l.peerName != null) {
+                            from.send(new Frame(Frame.HELLO, l.peerName, l.peerPhoto));
+                        }
+                    }
+                    synchronized (presences) {
+                        for (Map.Entry<String, byte[]> e : presences.entrySet()) {
+                            from.send(new Frame(Frame.PRESENCE, e.getKey(), e.getValue()));
+                        }
+                    }
+                }
+            }
+            if (owner) broadcast(f, from);
+            addMember(f.sender, f.payload);
+            return;
+        }
+        if (f.type == Frame.REJECT) {
+            cb.onRejected(new String(f.payload, UTF8));
+            return;
+        }
+        if (owner) {
+            // Clients never relay, so every frame on a client link must be from that client.
+            // This stops one member from posing as another (fake SOS or announcements).
+            if (from.peerName == null || !from.peerName.equals(f.sender)) return;
+            broadcast(f, from);
+        }
+        switch (f.type) {
+            case Frame.TEXT:
+                cb.onText(f.sender, new String(f.payload, UTF8));
+                break;
+            case Frame.AUDIO:
+                cb.onAudio(f.sender, f.payload);
+                break;
+            case Frame.TALK_START:
+                cb.onTalkState(f.sender, true);
+                break;
+            case Frame.TALK_END:
+                cb.onTalkState(f.sender, false);
+                break;
+            case Frame.PRESENCE:
+                synchronized (presences) { presences.put(f.sender, f.payload); }
+                cb.onPresence(f.sender, f.payload);
+                break;
+            case Frame.ANNOUNCE:
+                cb.onAnnouncement(f.sender, new String(f.payload, UTF8));
+                break;
+            case Frame.LEAVE:
+                removeMember(f.sender);
+                break;
+            default:
+                break;
+        }
+    }
+
+    @Override public void onClosed(Link link) {
+        links.remove(link);
+        if (stopped || link.peerName == null) return;
+        if (owner) {
+            broadcast(new Frame(Frame.LEAVE, link.peerName, null), null);
+            removeMember(link.peerName);
+        } else {
+            // Lost the group owner, and with it everyone it relayed for us.
+            List<String> all;
+            synchronized (members) { all = new ArrayList<String>(members.keySet()); }
+            for (String n : all) removeMember(n);
+        }
+    }
+
+    private boolean nameTaken(String name) {
+        if (name.equals(myName)) return true;
+        for (Link l : links) {
+            if (name.equals(l.peerName)) return true;
+        }
+        return false;
+    }
+
+    private void addMember(String name, byte[] photo) {
+        synchronized (members) { members.put(name, photo); }
+        cb.onMemberJoined(name, photo);
+    }
+
+    private void removeMember(String name) {
+        boolean had;
+        synchronized (members) { had = members.remove(name) != null; }
+        synchronized (presences) { presences.remove(name); }
+        if (had) {
+            cb.onTalkState(name, false);
+            cb.onMemberLeft(name);
+        }
+    }
+
+    void stop() {
+        ServerSocket s;
+        synchronized (this) {
+            stopped = true;
+            s = server;
+        }
+        if (s != null) {
+            try { s.close(); } catch (IOException ignored) { }
+        }
+        for (Link l : links) l.close();
+        links.clear();
+    }
+}

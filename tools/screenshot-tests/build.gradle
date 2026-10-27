@@ -1,0 +1,58 @@
+// JVM tests for Saling Jaga: real-socket tests of the group protocol (HubTest) and
+// screenshots of the UI rendered with Robolectric native graphics (ScreenshotTest).
+// Run ./build.sh at the repo root first, then: gradle test  (screenshots land in out/)
+plugins { id 'java' }
+
+repositories { mavenCentral() }
+
+def repoRoot = file('../..')
+def androidJar = '/usr/lib/android-sdk/platforms/android-23/android.jar'
+
+// Robolectric pulls androidx.test from Google Maven; small stubs in src/test replace it,
+// so everything resolves from Maven Central alone.
+configurations.all {
+    exclude group: 'androidx.test'
+    exclude group: 'androidx.test.espresso'
+}
+
+sourceSets {
+    test {
+        java {
+            srcDir new File(repoRoot, 'app/src/main/java')
+            srcDir new File(repoRoot, 'build/gen')
+        }
+        resources { srcDir "$buildDir/generated/test-config" }
+    }
+}
+
+dependencies {
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'junit:junit:4.13.2'
+    testRuntimeOnly 'org.robolectric:android-all:14-robolectric-10818077'
+    testCompileOnly files(androidJar)
+}
+
+// Points Robolectric at the resources compiled by build.sh.
+task testConfig {
+    def out = file("$buildDir/generated/test-config/com/android/tools/test_config.properties")
+    outputs.file out
+    doLast {
+        out.parentFile.mkdirs()
+        out.text = """android_resource_apk=${new File(repoRoot, 'build/unsigned.apk').absolutePath}
+android_merged_manifest=${new File(repoRoot, 'app/src/main/AndroidManifest.xml').absolutePath}
+android_merged_assets=${file("$buildDir/empty-assets").absolutePath}
+android_custom_package=com.salingjaga.app
+"""
+        file("$buildDir/empty-assets").mkdirs()
+    }
+}
+processTestResources.dependsOn testConfig
+
+tasks.withType(JavaCompile) { sourceCompatibility = '17'; targetCompatibility = '17' }
+
+test {
+    systemProperty 'robolectric.graphicsMode', 'NATIVE'
+    systemProperty 'shots.out', "$projectDir/out"
+    maxHeapSize = '3g'
+    testLogging { events 'failed'; exceptionFormat 'full' }
+}

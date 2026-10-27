@@ -1,0 +1,9 @@
+build/
+*.apk
+*.keystore
+*.jks
+.gradle/
+tools/screenshot-tests/out/
+tools/screenshot-tests/build/
+local.properties
+.idea/
