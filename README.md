@@ -77,7 +77,7 @@ Saling Jaga belum ada di Play Store, jadi dipasang langsung dari file APK (sekit
 
 Untuk anggota rombongan yang tidak punya internet, kirim file APK dari HP yang sudah memasangnya lewat Quick Share / Nearby Share, Bluetooth, atau kabel data.
 
-> Selama aplikasi belum memakai kunci rilis permanen, APK versi baru mungkin menolak dipasang di atas versi lama ("Aplikasi tidak terpasang"). Hapus dulu versi lama, lalu pasang lagi.
+**Update ke versi baru:** cukup unduh dan pasang APK terbaru di atas versi lama, tanpa menghapusnya. Nama, foto, dan kontak darurat tetap tersimpan. Pengecualian satu kali: APK yang diunduh sebelum kunci rilis permanen dipakai (v0.6.0 awal) perlu dihapus dulu, karena ditandatangani dengan kunci lain.
 
 ## Apakah aman dipasang di luar Play Store?
 
@@ -139,7 +139,6 @@ Yang sudah diterapkan:
 Belum ada (direncanakan):
 - **Identitas terverifikasi**: kunci digital per HP, kode pendek `SJ-XXXX-XXXX` + QR untuk pendataan, dan label "Posko terverifikasi" untuk pengumuman resmi.
 - **Enkripsi ujung ke ujung** dengan kunci grup.
-- Kunci rilis permanen. Selama secret kunci rilis belum diisi, APK ditandatangani dengan kunci sementara yang bisa berbeda di tiap rilis.
 
 ## Batasan saat ini
 
@@ -182,7 +181,7 @@ cd tools/screenshot-tests && gradle test
 
 GitHub Actions:
 - `build.yml` menjalankan build dan kedua tes di setiap push dan PR, lalu mengunggah APK dan screenshot sebagai artefak.
-- `release.yml` membangun APK di setiap push ke `main` dan menaruhnya di GitHub Release `v<versionName>` sebagai `saling-jaga.apk`. Jika secret `SIGNING_KEYSTORE_B64` (keystore dalam base64), `SIGNING_KS_PASS`, `SIGNING_KEY_ALIAS`, dan `SIGNING_KEY_PASS` diisi, APK ditandatangani dengan kunci rilis.
+- `release.yml` membangun APK di setiap push ke `main` dan menaruhnya di GitHub Release `v<versionName>` sebagai `saling-jaga.apk`. Jika secret `SIGNING_KEYSTORE_B64` (keystore dalam base64), `SIGNING_KS_PASS`, `SIGNING_KEY_ALIAS`, dan `SIGNING_KEY_PASS` diisi, APK ditandatangani dengan kunci rilis. `versionCode` diisi otomatis dari nomor run (+100) supaya setiap rilis terpasang sebagai update.
 - `pages.yml` menerbitkan folder `docs/` ke GitHub Pages (situs web proyek).
 
 ## Struktur proyek
