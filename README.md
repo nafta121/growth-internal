@@ -153,4 +153,14 @@ docs/                      logo, splash, screenshot
 
 ## Lisensi
 
-Belum ditentukan.
+Saling Jaga memakai model **open-core**:
+
+- **Aplikasi warga** (repositori ini) berlisensi [GNU AGPL-3.0-or-later](LICENSE). Siapa pun boleh memakai,
+  mempelajari, mengubah, dan membagikannya. Siapa pun yang membagikan atau menjalankan versi modifikasi
+  wajib membuka kode sumbernya dengan lisensi yang sama.
+- **Edisi Posko / Tim** (dasbor koordinator, peta offline, absen massal, laporan, enkripsi tim)
+  dikembangkan terpisah dengan lisensi komersial.
+- **Nama, logo, dan slogan "Saling Jaga"** adalah merek dan tidak termasuk dalam AGPL. Lihat
+  [TRADEMARK.md](TRADEMARK.md).
+
+Copyright (C) 2026 Chalid Ade Rahman
