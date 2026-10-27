@@ -173,11 +173,11 @@ final class Hub implements Link.Listener {
     private void addLink(Socket s) throws IOException {
         if (stopped) { s.close(); return; }
         Link link = new Link(s, this);
-        links.add(link);
-        link.start();
         link.send(new Frame(Frame.HELLO, myName, myPhoto));
         byte[] p = myPresence;
         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
+        links.add(link);
+        link.start();
     }
 
     void sendPresence(byte[] presence) {
