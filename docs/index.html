@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saling Jaga · Komunikasi darurat tanpa internet</title>
+<meta name="description" content="Saling Jaga: telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal. Untuk bencana, pendakian, dan kegiatan di alam.">
+<meta property="og:title" content="Saling Jaga">
+<meta property="og:description" content="Telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal.">
+<meta property="og:image" content="brand/logo-wordmark.png">
+<meta name="theme-color" content="#1C5233">
+<link rel="icon" href="brand/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --brand: #1C5233;
+    --accent: #1F7A45;
+    --leaf: #2EA85C;
+    --bg: #F7F7F1;
+    --card: #FFFFFF;
+    --soft: #E2F2E7;
+    --ink: #1B2A21;
+    --muted: #5A6B60;
+    --line: #E3E6DC;
+    --danger: #D93636;
+    --amber-soft: #FEF3DB;
+    --amber-text: #925400;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: Nunito, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17px; line-height: 1.6;
+  }
+  a { color: var(--accent); }
+  img { max-width: 100%; display: block; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(247, 247, 241, .92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--brand); text-decoration: none; font-size: 19px; }
+  .brand img { width: 34px; height: 34px; }
+  nav a { color: var(--ink); text-decoration: none; font-weight: 600; margin-left: 22px; font-size: 15px; }
+  nav a:hover { color: var(--accent); }
+  @media (max-width: 720px) { nav a:not(.nav-cta) { display: none; } }
+  .nav-cta { background: var(--brand); color: #fff !important; padding: 8px 16px; border-radius: 999px; }
+
+  .hero { padding: 56px 0 40px; }
+  .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; }
+  @media (max-width: 860px) { .hero .wrap { grid-template-columns: 1fr; } }
+  .eyebrow { display: inline-block; background: var(--soft); color: var(--accent); font-weight: 700; font-size: 14px; padding: 6px 14px; border-radius: 999px; }
+  h1 { font-size: clamp(36px, 6vw, 56px); line-height: 1.08; margin: 18px 0 16px; color: var(--brand); font-weight: 800; letter-spacing: -.5px; }
+  h1 span { color: var(--leaf); }
+  .lead { font-size: 19px; color: var(--muted); max-width: 560px; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 14px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 14px; font-weight: 800; text-decoration: none; font-size: 17px; }
+  .btn-primary { background: var(--brand); color: #fff; box-shadow: 0 6px 18px rgba(28, 82, 51, .25); }
+  .btn-primary:hover { background: var(--accent); }
+  .btn-ghost { background: var(--card); color: var(--brand); border: 1.5px solid var(--line); }
+  .small { font-size: 14px; color: var(--muted); }
+  .hero-art { display: flex; justify-content: center; align-items: flex-start; gap: 14px; }
+  .phone { width: 220px; border-radius: 28px; overflow: hidden; border: 8px solid #13281C; background: #13281C; box-shadow: 0 20px 40px rgba(19, 40, 28, .22); }
+  .phone + .phone { margin-top: 48px; }
+  @media (max-width: 520px) { .phone { width: 46%; border-width: 6px; border-radius: 20px; } }
+
+  section { padding: 56px 0; }
+  h2 { font-size: clamp(28px, 4vw, 38px); color: var(--brand); margin: 0 0 12px; font-weight: 800; }
+  .section-lead { color: var(--muted); max-width: 680px; margin: 0 0 32px; font-size: 18px; }
+
+  .problem { background: var(--brand); color: #EAF4EC; }
+  .problem h2 { color: #fff; }
+  .problem .section-lead { color: #CFE5D6; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: 1fr; } }
+  .stat { background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .14); border-radius: 18px; padding: 22px; }
+  .stat b { display: block; font-size: 20px; color: #fff; margin-bottom: 6px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+  .card h3 { margin: 12px 0 6px; font-size: 19px; color: var(--ink); }
+  .card p { margin: 0; color: var(--muted); font-size: 16px; }
+  .ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--soft); color: var(--accent); }
+  .ico.red { background: #FBE3E3; color: var(--danger); }
+  .ico.amber { background: var(--amber-soft); color: var(--amber-text); }
+  .ico svg { width: 24px; height: 24px; }
+
+  .shots { display: flex; gap: 18px; overflow-x: auto; padding: 4px 4px 18px; scroll-snap-type: x mandatory; }
+  .shots figure { margin: 0; flex: 0 0 220px; scroll-snap-align: start; }
+  .shots img { border-radius: 20px; border: 1px solid var(--line); box-shadow: 0 8px 20px rgba(0, 0, 0, .06); }
+  .shots figcaption { text-align: center; font-weight: 700; font-size: 15px; margin-top: 10px; color: var(--muted); }
+
+  .steps { counter-reset: s; display: grid; gap: 14px; padding: 0; margin: 0; list-style: none; }
+  .steps li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px 18px 70px; position: relative; }
+  .steps li::before { content: counter(s); position: absolute; left: 18px; top: 16px; width: 36px; height: 36px; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 800; }
+  .steps b { color: var(--ink); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+  .note { background: var(--amber-soft); color: var(--amber-text); border-radius: 14px; padding: 14px 18px; font-size: 15px; margin-top: 16px; }
+
+  .diagram { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 24px; }
+  .diagram svg { width: 100%; height: auto; }
+
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; margin-bottom: 10px; }
+  summary { font-weight: 700; cursor: pointer; }
+  details p { color: var(--muted); margin: 10px 0 0; }
+
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .tiers { grid-template-columns: 1fr; } }
+  .tier { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 24px; }
+  .tier.main { border: 2px solid var(--leaf); }
+  .tier h3 { margin: 0 0 4px; color: var(--brand); }
+  .tier .price { font-weight: 800; font-size: 22px; margin-bottom: 10px; }
+  .tier ul { padding-left: 20px; margin: 0; color: var(--muted); }
+
+  .final { text-align: center; }
+  .final img { width: 220px; margin: 0 auto 16px; }
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 14px; color: var(--muted); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="brand/icon.png" alt="">Saling Jaga</a>
+    <nav>
+      <a href="#fitur">Fitur</a>
+      <a href="#instal">Cara instal</a>
+      <a href="#cara-kerja">Cara kerja</a>
+      <a href="#tanya">Tanya jawab</a>
+      <a class="nav-cta" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">Unduh APK</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow">Connecting in Crisis</span>
+        <h1>Tetap terhubung saat <span>sinyal hilang.</span></h1>
+        <p class="lead">Saling Jaga menghubungkan HP Android secara langsung, tanpa internet, tanpa SIM, dan tanpa router. Bicara, kirim pesan, bagikan lokasi, dan kirim SOS ke rombongan Anda saat bencana atau di alam.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+            Unduh APK gratis
+          </a>
+          <a class="btn btn-ghost" href="#instal">Cara instal</a>
+        </div>
+        <p class="small">Android 6.0 ke atas · sekitar 200 KB · gratis untuk warga · kode terbuka (AGPL-3.0)</p>
+      </div>
+      <div class="hero-art">
+        <div class="phone"><img src="screenshots/2-grup-dan-chat.png" alt="Layar grup dan chat"></div>
+        <div class="phone"><img src="screenshots/3-sos-masuk.png" alt="Layar SOS masuk"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="problem">
+    <div class="wrap">
+      <h2>Saat paling dibutuhkan, sinyal justru hilang</h2>
+      <p class="section-lead">Gempa, banjir, dan longsor sering merusak BTS dan listrik. Di gunung, hutan, dan laut, sinyal memang tidak ada. Padahal di saat itulah orang perlu tahu: semua aman? Siapa yang butuh bantuan? Di mana mereka?</p>
+      <div class="stats">
+        <div class="stat"><b>Tanpa infrastruktur</b>HP saling tersambung lewat radio Wi‑Fi di dalam HP itu sendiri (Wi‑Fi Direct).</div>
+        <div class="stat"><b>Tanpa akun</b>Tidak perlu daftar, nomor HP, atau Google Play Services. Pasang, beri nama, langsung pakai.</div>
+        <div class="stat"><b>Satu rombongan</b>Satu HP menjadi pemilik grup dan meneruskan suara serta pesan ke semua anggota.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="fitur">
+    <div class="wrap">
+      <h2>Semua yang dibutuhkan rombongan</h2>
+      <p class="section-lead">Dirancang untuk kondisi darurat: tombol besar, sedikit langkah, dan tetap jalan saat layar mati.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+          <h3>Tahan untuk bicara</h3>
+          <p>Walkie-talkie ke seluruh anggota grup. Nama dan foto pembicara muncul di layar.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></div>
+          <h3>Mode telepon</h3>
+          <p>Suara dua arah terus-menerus dengan peredam gema dan derau bawaan HP.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
+          <h3>Chat dan pengumuman</h3>
+          <p>Pesan teks biasa, plus pengumuman kartu kuning yang berbunyi di semua HP untuk info titik kumpul.</p>
+        </div>
+        <div class="card">
+          <div class="ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg></div>
+          <h3>SOS</h3>
+          <p>Alarm keras dan getar di semua HP, lengkap dengan jarak dan arah ke pengirim, misalnya “259 m ke arah barat laut”.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z" stroke-linejoin="round"/></svg></div>
+          <h3>Kompas anggota</h3>
+          <p>Radar yang menunjukkan posisi tiap anggota sesuai arah aslinya. GPS tetap bekerja tanpa internet.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <h3>Status dan baterai</h3>
+          <p>Aman, butuh bantuan, atau terluka. Tampil di bawah foto tiap anggota bersama level baterai.</p>
+        </div>
+        <div class="card">
+          <div class="ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><path d="M3 3l18 18"/></svg></div>
+          <h3>Peringatan anggota terputus</h3>
+          <p>Kalau ada HP keluar jangkauan atau mati, semua anggota tahu dalam sekitar 10 detik.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg></div>
+          <h3>Jalan saat layar mati</h3>
+          <p>SOS, pesan, dan peringatan tetap masuk sebagai notifikasi di layar kunci.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></div>
+          <h3>Lokasi bisa dimatikan</h3>
+          <p>Tombol Bagikan lokasi di menu profil. Saat dimatikan, GPS ikut berhenti supaya hemat baterai.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap">
+      <h2>Tampilan aplikasi</h2>
+      <p class="section-lead">Dirender langsung dari kode aplikasi. Nama dan pesan di dalamnya hanya contoh.</p>
+      <div class="shots">
+        <figure><img src="screenshots/0-splash.png" alt="" loading="lazy"><figcaption>Pembuka</figcaption></figure>
+        <figure><img src="screenshots/1-cari-perangkat.png" alt="" loading="lazy"><figcaption>Cari perangkat</figcaption></figure>
+        <figure><img src="screenshots/2-grup-dan-chat.png" alt="" loading="lazy"><figcaption>Grup dan chat</figcaption></figure>
+        <figure><img src="screenshots/3-sos-masuk.png" alt="" loading="lazy"><figcaption>SOS masuk</figcaption></figure>
+        <figure><img src="screenshots/4-sos-sendiri-dan-terputus.png" alt="" loading="lazy"><figcaption>SOS dan anggota terputus</figcaption></figure>
+        <figure><img src="screenshots/5-kompas.png" alt="" loading="lazy"><figcaption>Kompas</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="instal" style="background:#EEF3EA">
+    <div class="wrap two">
+      <div>
+        <h2>Cara instal di HP</h2>
+        <p class="section-lead">Saling Jaga belum ada di Play Store, jadi dipasang langsung dari file APK. Lakukan sebelum bencana atau sebelum berangkat, selagi masih ada internet.</p>
+        <ol class="steps">
+          <li>Buka halaman ini di HP Android, lalu ketuk <b><a href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">Unduh APK</a></b>.</li>
+          <li>Kalau browser memperingatkan file berbahaya, pilih <b>Tetap unduh</b>. Peringatan ini muncul untuk semua APK dari luar Play Store.</li>
+          <li>Buka file <b>saling-jaga.apk</b> dari notifikasi unduhan atau aplikasi File.</li>
+          <li>Jika muncul “Instal aplikasi tidak dikenal”, ketuk <b>Setelan</b>, aktifkan <b>Izinkan dari sumber ini</b>, lalu kembali.</li>
+          <li>Ketuk <b>Instal</b>. Jika Play Protect bertanya, pilih <b>Instal saja</b> atau <b>Instal tanpa memindai</b>.</li>
+          <li>Buka Saling Jaga, isi nama, dan izinkan Lokasi/Perangkat sekitar, Mikrofon, dan Notifikasi.</li>
+        </ol>
+        <p class="note">Bagikan ke anggota rombongan tanpa internet: kirim file APK lewat Quick Share / Nearby Share, Bluetooth, atau kabel data. Ukurannya hanya sekitar 200 KB.</p>
+      </div>
+      <div>
+        <h2>Cara pakai</h2>
+        <p class="section-lead">Dari HP terpasang sampai bisa saling bicara, kira-kira satu menit.</p>
+        <ol class="steps">
+          <li>Nyalakan <b>Wi‑Fi</b> dan <b>Lokasi</b> di setiap HP. Wi‑Fi tidak perlu tersambung ke jaringan mana pun, dan tidak perlu hotspot.</li>
+          <li>Buka aplikasi di semua HP, lalu ketuk ikon <b>cari</b>.</li>
+          <li>Ketuk nama HP teman. HP teman menekan <b>Terima</b> pada undangan yang muncul.</li>
+          <li>Setelah status hijau <b>Terhubung</b>, tahan tombol mikrofon untuk bicara, atau ketuk telepon untuk mode panggilan.</li>
+          <li>Pakai chip <b>SOS</b>, <b>Kompas</b>, <b>Status</b>, dan <b>Pengumuman</b> di atas chat sesuai kebutuhan.</li>
+        </ol>
+        <p class="note">Jangkauan Wi‑Fi Direct sekitar 50–100 m di area terbuka. Kunci GPS pertama tanpa internet bisa butuh 1–3 menit di tempat terbuka.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="cara-kerja">
+    <div class="wrap two">
+      <div>
+        <h2>Cara kerja</h2>
+        <p class="section-lead" style="margin-bottom:16px">Tanpa server, tanpa cloud. Satu HP otomatis menjadi pemilik grup, dan HP lain tersambung ke HP itu lewat Wi‑Fi Direct.</p>
+        <p>Pemilik grup meneruskan suara, pesan, status, dan SOS ke semua anggota. Anggota yang baru bergabung langsung menerima daftar anggota, status terakhir, dan SOS yang masih aktif.</p>
+        <p>Setiap HP mengirim sinyal hidup tiap 3 detik. HP yang diam lebih dari 10 detik dianggap terputus, dan semua anggota diberi tahu.</p>
+        <p>Lalu lintas di udara terenkripsi WPA2 milik Wi‑Fi Direct. Pemilik grup menolak pesan yang mengaku dari anggota lain, jadi tidak ada SOS palsu atas nama orang lain.</p>
+      </div>
+      <div class="diagram">
+        <svg viewBox="0 0 420 300" role="img" aria-label="Tiga HP anggota tersambung ke satu HP pemilik grup">
+          <g stroke="#2EA85C" stroke-width="3" stroke-dasharray="6 6">
+            <line x1="210" y1="150" x2="80" y2="60"/>
+            <line x1="210" y1="150" x2="340" y2="60"/>
+            <line x1="210" y1="150" x2="80" y2="240"/>
+            <line x1="210" y1="150" x2="340" y2="240"/>
+          </g>
+          <g font-family="Nunito, sans-serif" font-size="13" font-weight="700" text-anchor="middle">
+            <circle cx="210" cy="150" r="46" fill="#1C5233"/>
+            <text x="210" y="146" fill="#fff">Pemilik</text>
+            <text x="210" y="163" fill="#fff">grup</text>
+            <g fill="#E2F2E7" stroke="#1F7A45" stroke-width="2">
+              <circle cx="80" cy="60" r="32"/><circle cx="340" cy="60" r="32"/>
+              <circle cx="80" cy="240" r="32"/><circle cx="340" cy="240" r="32"/>
+            </g>
+            <g fill="#1C5233">
+              <text x="80" y="65">Andi</text><text x="340" y="65">Sari</text>
+              <text x="80" y="245">Budi</text><text x="340" y="245">Rina</text>
+            </g>
+          </g>
+        </svg>
+        <p class="small" style="text-align:center;margin:8px 0 0">Satu grup bisa berisi hingga 16 HP.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="tanya" style="padding-top:0">
+    <div class="wrap">
+      <h2>Tanya jawab</h2>
+      <details>
+        <summary>Apakah benar-benar tidak butuh internet atau pulsa?</summary>
+        <p>Benar. Data seluler boleh mati dan HP boleh tanpa kartu SIM. Yang perlu menyala hanya Wi‑Fi dan Lokasi. Internet hanya dibutuhkan sekali, saat mengunduh APK.</p>
+      </details>
+      <details>
+        <summary>Kalau Wi‑Fi saya sedang tersambung ke jaringan rumah atau kantor, apakah tetap bisa?</summary>
+        <p>Bisa. Wi‑Fi Direct berjalan berdampingan dengan koneksi Wi‑Fi biasa di kebanyakan HP. Orang lain di jaringan yang sama tidak bisa masuk ke grup tanpa diundang.</p>
+      </details>
+      <details>
+        <summary>Seberapa jauh jangkauannya?</summary>
+        <p>Sekitar 50–100 m di area terbuka, lebih pendek di dalam gedung. Untuk jarak kilometer, kami sedang menyiapkan integrasi dengan perangkat radio LoRa.</p>
+      </details>
+      <details>
+        <summary>Apakah aman? Siapa yang bisa mendengar percakapan?</summary>
+        <p>Hanya anggota yang Anda terima ke grup. Sinyal di udara terenkripsi WPA2. Enkripsi ujung ke ujung dan identitas terverifikasi sedang dikembangkan.</p>
+      </details>
+      <details>
+        <summary>Kenapa HP memperingatkan saat memasang APK?</summary>
+        <p>Android memperingatkan setiap aplikasi yang tidak berasal dari Play Store. Kode Saling Jaga terbuka di GitHub dan bisa diperiksa siapa pun. Versi Play Store menyusul setelah uji lapangan.</p>
+      </details>
+      <details>
+        <summary>Apakah sudah siap dipakai saat bencana sungguhan?</summary>
+        <p>Saling Jaga masih versi awal (MVP). Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di banyak merek HP. Coba dulu bersama keluarga atau rombongan, dan kirim masukan lewat GitHub.</p>
+      </details>
+    </div>
+  </section>
+
+  <section style="background:#EEF3EA">
+    <div class="wrap">
+      <h2>Gratis untuk warga, siap untuk tim</h2>
+      <p class="section-lead">Aplikasi warga gratis selamanya dan kodenya terbuka. Edisi untuk tim dan institusi membiayai pengembangannya.</p>
+      <div class="tiers">
+        <div class="tier main">
+          <h3>Warga</h3>
+          <div class="price">Gratis</div>
+          <ul><li>Semua fitur aplikasi di halaman ini</li><li>Kode terbuka AGPL-3.0</li><li>Tanpa iklan, tanpa akun</li></ul>
+        </div>
+        <div class="tier">
+          <h3>Tim / Posko</h3>
+          <div class="price">Segera</div>
+          <ul><li>Dasbor koordinator</li><li>Peta offline dan absen massal</li><li>Laporan pasca-kejadian, kanal terenkripsi</li></ul>
+        </div>
+        <div class="tier">
+          <h3>Institusi</h3>
+          <div class="price">Hubungi kami</div>
+          <ul><li>BPBD, SAR, PMI, sekolah, perusahaan</li><li>Lisensi, kustomisasi, pelatihan</li><li>Paket perangkat LoRa untuk posko</li></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <img src="brand/logo-wordmark.png" alt="Logo Saling Jaga">
+      <h2>Pasang sekarang, sebelum dibutuhkan</h2>
+      <p class="section-lead" style="margin:0 auto 24px">Ajak keluarga dan rombongan memasangnya juga. Aplikasi ini hanya berguna kalau HP di sekitar Anda juga punya.</p>
+      <div class="cta-row" style="justify-content:center">
+        <a class="btn btn-primary" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">Unduh APK gratis</a>
+        <a class="btn btn-ghost" href="https://github.com/chalidade/saling-jaga">Lihat kode di GitHub</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Chalid Ade Rahman · Aplikasi berlisensi <a href="https://github.com/chalidade/saling-jaga/blob/main/LICENSE">AGPL-3.0</a></span>
+    <span>“Saling Jaga” dan logonya adalah merek, lihat <a href="https://github.com/chalidade/saling-jaga/blob/main/TRADEMARK.md">TRADEMARK.md</a></span>
+  </div>
+</footer>
+</body>
+</html>

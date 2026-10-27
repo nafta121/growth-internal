@@ -1,9 +1,16 @@
 <p align="center">
-  <img src="docs/brand/logo.png" alt="Logo Saling Jaga" width="180">
+  <img src="docs/brand/logo-wordmark.png" alt="Saling Jaga" width="240">
 </p>
 
-<h1 align="center">Saling Jaga</h1>
 <p align="center"><b>Connecting in Crisis</b>: telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal.</p>
+
+<p align="center">
+  <a href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk"><b>⬇️ Unduh APK</b></a>
+  &nbsp;·&nbsp;
+  <a href="#cara-instal-di-hp">Cara instal</a>
+  &nbsp;·&nbsp;
+  <a href="https://chalidade.github.io/saling-jaga/">Situs web</a>
+</p>
 
 ---
 
@@ -45,13 +52,32 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 - Tombol **Bagikan lokasi** di menu profil, default nyala. Saat dimatikan, GPS ikut berhenti supaya hemat baterai.
 - Ukuran APK sekitar 200 KB dan berjalan di Android 6.0 ke atas.
 
+## Cara instal di HP
+
+Saling Jaga belum ada di Play Store, jadi dipasang langsung dari file APK (sekitar 200 KB, Android 6.0 ke atas). Pasang sebelum bencana atau sebelum berangkat, selagi masih ada internet.
+
+1. Buka link ini di HP Android: **[saling-jaga.apk](https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk)**. Semua versi ada di halaman [Releases](https://github.com/chalidade/saling-jaga/releases).
+2. Kalau browser memperingatkan file berbahaya, pilih **Tetap unduh**. Peringatan ini muncul untuk semua APK dari luar Play Store.
+3. Buka `saling-jaga.apk` dari notifikasi unduhan atau aplikasi File.
+4. Jika muncul "Instal aplikasi tidak dikenal", ketuk **Setelan**, aktifkan **Izinkan dari sumber ini**, lalu kembali.
+5. Ketuk **Instal**. Jika Play Protect bertanya, pilih **Instal saja** / **Instal tanpa memindai**.
+
+Untuk anggota rombongan yang tidak punya internet, kirim file APK dari HP yang sudah memasangnya lewat Quick Share / Nearby Share, Bluetooth, atau kabel data.
+
+> Selama aplikasi belum memakai kunci rilis permanen, APK versi baru mungkin menolak dipasang di atas versi lama ("Aplikasi tidak terpasang"). Hapus dulu versi lama, lalu pasang lagi.
+
 ## Cara pakai
 
-1. Pasang APK di setiap HP. APK debug tersedia di tab **Actions** → build terbaru → artefak `saling-jaga-debug-apk`.
-2. Nyalakan **Wi‑Fi** dan **Lokasi** di setiap HP. Wi‑Fi tidak perlu tersambung ke jaringan mana pun dan tidak perlu menyalakan hotspot. Data seluler boleh mati.
-3. Buka aplikasi, lalu beri izin Lokasi/Perangkat sekitar, Mikrofon, dan Notifikasi.
-4. Ketuk ikon cari di semua HP. Ketuk nama HP lain, lalu HP tersebut menekan **Terima** pada undangan.
-5. Setelah status hijau "Terhubung", tahan tombol mikrofon untuk bicara, atau gunakan chip SOS / Kompas / Status / Pengumuman.
+1. Nyalakan **Wi‑Fi** dan **Lokasi** di setiap HP. Wi‑Fi tidak perlu tersambung ke jaringan mana pun dan tidak perlu menyalakan hotspot. Data seluler boleh mati.
+2. Buka aplikasi, isi nama, lalu beri izin Lokasi/Perangkat sekitar, Mikrofon, dan Notifikasi.
+3. Ketuk ikon **cari** di semua HP. Ketuk nama HP teman, lalu HP teman menekan **Terima** pada undangan.
+4. Setelah status hijau **Terhubung**, tahan tombol mikrofon untuk bicara, atau ketuk ikon telepon untuk mode panggilan.
+5. Gunakan chip di atas chat:
+   - **SOS**: alarm di semua HP, sampai Anda membatalkannya.
+   - **Kompas**: arah dan jarak ke tiap anggota.
+   - **Status**: Aman / Butuh bantuan / Terluka.
+   - **Pengumuman**: kartu kuning untuk info penting, misalnya titik kumpul.
+6. Ketuk foto profil di kanan atas untuk mengganti foto/nama atau mematikan **Bagikan lokasi**. Ketuk **Keluar** di kartu Grup untuk meninggalkan grup.
 
 Jangkauan Wi‑Fi Direct biasanya 50–100 m di area terbuka dan lebih pendek di dalam gedung. Kunci GPS pertama tanpa internet bisa butuh 1–3 menit di tempat terbuka.
 
@@ -120,7 +146,10 @@ cd tools/screenshot-tests && gradle test
 - `HubTest` menjalankan tiga hub di atas socket sungguhan. Yang diuji: relay pesan, teks, dan suara; pengiriman ulang SOS ke anggota baru; penolakan penyamaran; batas ukuran pesan; penolakan nama ganda; dan deteksi anggota keluar.
 - `ScreenshotTest` merender layar aplikasi dengan Robolectric (native graphics) ke `tools/screenshot-tests/out/`. Gambar di README berasal dari tes ini.
 
-GitHub Actions (`.github/workflows/build.yml`) menjalankan build dan kedua tes di setiap push, lalu mengunggah APK dan screenshot sebagai artefak.
+GitHub Actions:
+- `build.yml` menjalankan build dan kedua tes di setiap push dan PR, lalu mengunggah APK dan screenshot sebagai artefak.
+- `release.yml` membangun APK di setiap push ke `main` dan menaruhnya di GitHub Release `v<versionName>` sebagai `saling-jaga.apk`. Jika secret `SIGNING_KEYSTORE_B64` (keystore dalam base64), `SIGNING_KS_PASS`, `SIGNING_KEY_ALIAS`, dan `SIGNING_KEY_PASS` diisi, APK ditandatangani dengan kunci rilis.
+- `pages.yml` menerbitkan folder `docs/` ke GitHub Pages (situs web proyek).
 
 ## Struktur proyek
 
@@ -141,7 +170,7 @@ app/src/main/
   res/                     ikon, logo, splash, ikon vektor
 build.sh                   build APK tanpa Gradle
 tools/screenshot-tests/    tes protokol + render screenshot
-docs/                      logo, splash, screenshot
+docs/                      situs web (index.html), logo, splash, screenshot
 ```
 
 ## Model keberlanjutan
