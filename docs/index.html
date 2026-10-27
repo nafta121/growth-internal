@@ -184,6 +184,12 @@
   .chapters b { display: block; font-size: 13px; color: var(--leaf); font-variant-numeric: tabular-nums; }
   @media (max-width: 760px) { .chapters { grid-template-columns: repeat(2, 1fr); } .film video { border-radius: 16px; } }
 
+  .guide { margin-top: 40px; }
+  .guide h3 { margin: 0 0 6px; font-size: 18px; }
+  .shots { list-style: none; counter-reset: shot; margin: 18px 0 0; padding: 0 0 8px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .shots li { counter-increment: shot; scroll-snap-align: start; font-size: 14px; color: var(--muted); }
+  .shots img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); margin-bottom: 8px; }
+  .shots span::before { content: counter(shot) ". "; font-weight: 700; color: var(--brand); }
   footer { border-top: 1px solid var(--line); padding: 24px 0 40px; font-size: 14px; color: var(--muted); }
   footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
 </style>
@@ -356,7 +362,7 @@
             <li>Jika browser memperingatkan, pilih <b>Tetap unduh</b>.</li>
             <li>Buka <b>saling-jaga.apk</b> dari notifikasi unduhan.</li>
             <li>Jika muncul “Instal aplikasi tidak dikenal”, buka <b>Setelan</b> dan aktifkan <b>Izinkan dari sumber ini</b>.</li>
-            <li>Ketuk <b>Instal</b>. Jika Play Protect bertanya, pilih <b>Instal saja</b>.</li>
+            <li>Ketuk <b>Instal</b>. Jika Play Protect menyarankan pemindaian, pilih <b>Scan app</b>, tunggu sampai muncul “This app looks safe”, lalu ketuk <b>Install</b>.</li>
           </ol>
           <p class="aside">Untuk anggota tanpa internet, kirim file APK lewat Quick Share, Bluetooth, atau kabel data.</p>
         </div>
@@ -371,6 +377,18 @@
           </ol>
           <p class="aside">Jangkauan sekitar 50–100 m di area terbuka. Kunci GPS pertama tanpa internet bisa butuh 1–3 menit.</p>
         </div>
+      </div>
+      <div class="guide">
+        <h3>Peringatan saat instal itu normal</h3>
+        <p class="aside">Android selalu menampilkan peringatan untuk aplikasi yang dipasang di luar Play Store. Ini bukan tanda aplikasinya berbahaya. Hasil pindaian Google Play Protect untuk Saling Jaga: <b>aman</b>. Contoh di HP OPPO:</p>
+        <ol class="shots">
+          <li><img src="install/1-buka-setelan.jpg" alt="Dialog Chrome: HP belum mengizinkan instal aplikasi dari sumber ini" loading="lazy" width="360" height="800"><span>Ketuk <b>Settings</b></span></li>
+          <li><img src="install/2-izinkan-sumber.jpg" alt="Setelan Instal aplikasi tidak dikenal untuk Chrome" loading="lazy" width="360" height="800"><span>Aktifkan <b>Allow apps from this source</b></span></li>
+          <li><img src="install/3-instal.jpg" alt="Dialog: Do you want to install this app? Saling Jaga" loading="lazy" width="360" height="800"><span>Ketuk <b>Install</b></span></li>
+          <li><img src="install/4-scan-play-protect.jpg" alt="Google Play Protect: App scan recommended" loading="lazy" width="360" height="800"><span>Pilih <b>Scan app</b></span></li>
+          <li><img src="install/5-aman-instal.jpg" alt="Google Play Protect: This app looks safe" loading="lazy" width="360" height="800"><span>“Looks safe”, ketuk <b>Install</b></span></li>
+          <li><img src="install/6-terpasang.jpg" alt="Dialog: App installed" loading="lazy" width="360" height="800"><span>Selesai, ketuk <b>Open</b></span></li>
+        </ol>
       </div>
     </section>
   </div>
