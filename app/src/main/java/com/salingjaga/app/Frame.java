@@ -13,6 +13,7 @@ final class Frame {
     static final byte ANNOUNCE = 9;
     static final byte REJECT = 10;
     static final byte IMAGE = 11;
+    static final byte VIDEO_CHUNK = 12;
 
     /** Largest payload accepted per type, so a bad peer cannot exhaust memory. */
     static int maxPayload(byte type) {
@@ -24,6 +25,7 @@ final class Frame {
             case REJECT: return 8 * 1024;
             case PRESENCE: return 256;
             case IMAGE: return Photos.MAX_BYTES; // one compressed JPEG
+            case VIDEO_CHUNK: return Clips.HEADER + Clips.CHUNK;
             default: return 0;
         }
     }

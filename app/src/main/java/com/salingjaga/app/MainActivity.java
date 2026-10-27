@@ -79,6 +79,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     private static final int REQ_PHOTO = 2;
     private static final int REQ_CAMERA = 3;
     private static final int REQ_SEND_PHOTO = 4;
+    private static final int REQ_VIDEO = 5;
+    private static final int REQ_SEND_VIDEO = 6;
+    private static final int VIDEO_SECONDS = 15;
 
     // Saling Jaga palette: forest green, leaf green, warm cream.
     private static final int BRAND = Color.rgb(28, 82, 51);
@@ -165,6 +168,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         w.setNavigationBarColor(BG);
         w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         prefs = getSharedPreferences("salingjaga", MODE_PRIVATE);
+        if (state == null) clearClips();
         myName = prefs.getString("name", Build.MODEL);
         String p = prefs.getString("photo", null);
         myPhoto = p == null ? null : Base64.decode(p, Base64.DEFAULT);
@@ -862,11 +866,16 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void askPhotoSource() {
         if (!ready()) return;
         new AlertDialog.Builder(this)
-                .setTitle("Kirim foto ke grup")
-                .setItems(new String[] {"Ambil foto dengan kamera", "Pilih dari galeri"},
+                .setTitle("Kirim ke grup")
+                .setItems(new String[] {"Ambil foto dengan kamera",
+                                "Rekam video (maks. " + VIDEO_SECONDS + " detik)",
+                                "Pilih foto dari galeri", "Pilih video dari galeri"},
                         new DialogInterface.OnClickListener() {
                             @Override public void onClick(DialogInterface d, int which) {
-                                if (which == 0) takePhoto(); else pickPhotoToSend();
+                                if (which == 0) takePhoto();
+                                else if (which == 1) recordVideo();
+                                else if (which == 2) pickPhotoToSend();
+                                else pickVideoToSend();
                             }
                         })
                 .show();
@@ -894,6 +903,188 @@ public class MainActivity extends Activity implements Hub.Callback {
         } catch (RuntimeException e) {
             toast("Tidak ada aplikasi galeri");
         }
+    }
+
+    /** Asks the camera app for a short, low-quality clip written into our CaptureProvider. */
+    private void recordVideo() {
+        CaptureProvider.videoFile(this).delete();
+        Intent i = new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
+        i.putExtra(MediaStore.EXTRA_DURATION_LIMIT, VIDEO_SECONDS);
+        i.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 0);
+        i.putExtra(MediaStore.EXTRA_SIZE_LIMIT, (long) Clips.MAX_BYTES);
+        i.putExtra(MediaStore.EXTRA_OUTPUT, CaptureProvider.VIDEO);
+        i.setClipData(ClipData.newRawUri("", CaptureProvider.VIDEO));
+        i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(i, REQ_VIDEO);
+        } catch (RuntimeException e) {
+            toast("Tidak ada aplikasi kamera");
+        }
+    }
+
+    private void pickVideoToSend() {
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("video/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(i, "Pilih video"), REQ_SEND_VIDEO);
+        } catch (RuntimeException e) {
+            toast("Tidak ada aplikasi galeri");
+        }
+    }
+
+    /** Reads the clip off the UI thread, refuses anything over the limit, then sends it in chunks. */
+    private void sendVideo(final Uri uri) {
+        toast("Menyiapkan video…");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String problem = null;
+                try {
+                    final byte[] clip = readLimited(uri, Clips.MAX_BYTES);
+                    if (clip == null) {
+                        problem = "Video terlalu besar (maks. 4 MB). Rekam lebih pendek.";
+                    } else if (clip.length == 0) {
+                        problem = "Video kosong";
+                    } else if (hub == null || !hub.hasPeers()) {
+                        problem = "Belum terhubung ke HP lain";
+                    } else {
+                        hub.sendVideo(clip);
+                        final java.io.File f = saveClip(clip);
+                        ui.post(new Runnable() {
+                            @Override public void run() { addVideoBubble(myName, f, true); }
+                        });
+                    }
+                } catch (Exception e) {
+                    problem = "Video tidak bisa dibuka";
+                }
+                if (problem != null) {
+                    final String msg = problem;
+                    ui.post(new Runnable() {
+                        @Override public void run() { toast(msg); }
+                    });
+                }
+            }
+        }, "video-prepare").start();
+    }
+
+    /** Returns the content's bytes, or null if it is larger than max. */
+    private byte[] readLimited(Uri uri, int max) throws java.io.IOException {
+        java.io.InputStream in = getContentResolver().openInputStream(uri);
+        if (in == null) throw new java.io.IOException("no stream");
+        try {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                if (out.size() + n > max) return null;
+                out.write(buf, 0, n);
+            }
+            return out.toByteArray();
+        } finally {
+            in.close();
+        }
+    }
+
+    private java.io.File videoDir() {
+        java.io.File d = new java.io.File(getCacheDir(), "videos");
+        d.mkdirs();
+        return d;
+    }
+
+    /** Clips live in the cache only for this session, like the rest of the chat. */
+    private synchronized java.io.File saveClip(byte[] clip) throws java.io.IOException {
+        java.io.File f = new java.io.File(videoDir(),
+                "clip-" + System.currentTimeMillis() + "-" + (clipCount++) + ".mp4");
+        java.io.FileOutputStream out = new java.io.FileOutputStream(f);
+        try {
+            out.write(clip);
+        } finally {
+            out.close();
+        }
+        return f;
+    }
+
+    private int clipCount;
+
+    private void clearClips() {
+        java.io.File[] old = videoDir().listFiles();
+        if (old != null) for (java.io.File f : old) f.delete();
+    }
+
+    private void addVideoBubble(String from, final java.io.File clip, boolean mine) {
+        LinearLayout wrapRow = row();
+        wrapRow.setGravity(mine ? Gravity.END : Gravity.START);
+        LinearLayout b = column();
+        b.setPadding(dp(6), dp(6), dp(6), dp(6));
+        b.setBackground(shape(mine ? ACCENT : CARD, 16, mine ? 0 : LINE));
+        if (!mine) {
+            TextView name = text(from, 12, ACCENT, true);
+            name.setPadding(dp(8), dp(2), dp(8), dp(4));
+            b.addView(name);
+        }
+        int w = (int) (getResources().getDisplayMetrics().widthPixels * 0.62f);
+        int h = w * 9 / 16;
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackground(shape(0xFF1F2328, 12, 0));
+        frame.setClipToOutline(true);
+        Bitmap thumb = null;
+        try {
+            thumb = android.media.ThumbnailUtils.createVideoThumbnail(clip.getPath(),
+                    MediaStore.Images.Thumbnails.MINI_KIND);
+        } catch (RuntimeException ignored) {
+        }
+        if (thumb != null) {
+            ImageView img = new ImageView(this);
+            img.setImageBitmap(thumb);
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            frame.addView(img, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            h = Math.min(w * 4 / 3, Math.round(w * (float) thumb.getHeight() / thumb.getWidth()));
+        }
+        FrameLayout play = new FrameLayout(this);
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(0x99000000);
+        play.setBackground(dot);
+        play.addView(icon(R.drawable.ic_play, Color.WHITE, 28));
+        frame.addView(play, new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER));
+        frame.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { playVideo(clip); }
+        });
+        b.addView(frame, lp(w, h));
+        TextView time = text("Video · " + now(), 11, mine ? 0xCCFFFFFF : SUB, false);
+        time.setGravity(Gravity.END);
+        time.setPadding(dp(8), dp(4), dp(8), 0);
+        b.addView(time, fill());
+        wrapRow.addView(b, wrap());
+        addChatView(wrapRow);
+    }
+
+    private void playVideo(java.io.File clip) {
+        final android.app.Dialog d = new android.app.Dialog(this,
+                android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout box = new FrameLayout(this);
+        box.setBackgroundColor(Color.BLACK);
+        final android.widget.VideoView v = new android.widget.VideoView(this);
+        box.addView(v, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        android.widget.MediaController mc = new android.widget.MediaController(this);
+        mc.setAnchorView(v);
+        v.setMediaController(mc);
+        v.setVideoPath(clip.getPath());
+        v.setOnErrorListener(new android.media.MediaPlayer.OnErrorListener() {
+            @Override public boolean onError(android.media.MediaPlayer mp, int what, int extra) {
+                toast("Video tidak bisa diputar");
+                d.dismiss();
+                return true;
+            }
+        });
+        box.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View x) { d.dismiss(); }
+        });
+        d.setContentView(box);
+        d.show();
+        v.start();
     }
 
     /** Shrinks the photo off the UI thread, then sends it and shows it in the chat. */
@@ -1419,6 +1610,18 @@ public class MainActivity extends Activity implements Hub.Callback {
             sendPhoto(data.getData());
             return;
         }
+        if (req == REQ_VIDEO && result == RESULT_OK) {
+            // Most camera apps honour EXTRA_OUTPUT; some only return their own uri.
+            boolean wrote = CaptureProvider.videoFile(this).length() > 0;
+            if (wrote) sendVideo(CaptureProvider.VIDEO);
+            else if (data != null && data.getData() != null) sendVideo(data.getData());
+            else toast("Video tidak tersimpan");
+            return;
+        }
+        if (req == REQ_SEND_VIDEO && result == RESULT_OK && data != null && data.getData() != null) {
+            sendVideo(data.getData());
+            return;
+        }
         if (req != REQ_PHOTO || result != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         try {
@@ -1730,6 +1933,27 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 addImageBubble(from, jpeg, false);
                 notifyAway(Alerts.CH_MESSAGES, from, "Mengirim foto");
+            }
+        });
+    }
+
+    @Override public void onVideoIncoming(final String from) {
+        ui.post(new Runnable() {
+            @Override public void run() { addSystemMessage(from + " mengirim video…"); }
+        });
+    }
+
+    @Override public void onVideo(final String from, byte[] clip) {
+        final java.io.File f;
+        try {
+            f = saveClip(clip);
+        } catch (java.io.IOException e) {
+            return;
+        }
+        ui.post(new Runnable() {
+            @Override public void run() {
+                addVideoBubble(from, f, false);
+                notifyAway(Alerts.CH_MESSAGES, from, "Mengirim video");
             }
         });
     }

@@ -28,6 +28,8 @@ public class HubTest {
         public void onAnnouncement(String f, String t) { log.add("announce:" + f + ":" + t); }
         public void onRejected(String r) { log.add("rejected"); }
         public void onImage(String f, byte[] j) { log.add("image:" + f + ":" + j.length); }
+        public void onVideoIncoming(String f) { log.add("video-incoming:" + f); }
+        public void onVideo(String f, byte[] v) { log.add("video:" + f + ":" + v.length + ":" + v[v.length - 1]); }
     }
 
     static void waitFor(Rec r, String entry) throws Exception {
@@ -64,6 +66,14 @@ public class HubTest {
         waitFor(rb, "audio:Budi:640");
         b.sendImage(new byte[300 * 1024]);
         waitFor(ra, "image:Sari:" + (300 * 1024));   // a full-size photo is relayed whole
+        byte[] clip = new byte[1024 * 1024 + 123];
+        clip[clip.length - 1] = 7;
+        b.sendVideo(clip);
+        a.sendAudio(new byte[320]);
+        waitFor(rb, "audio:Budi:320");               // voice still flows while the clip is chunked
+        waitFor(ra, "video-incoming:Sari");
+        waitFor(ra, "video:Sari:" + clip.length + ":7");   // reassembled in order
+        waitFor(ro, "video:Sari:" + clip.length + ":7");
 
         // A raw client claiming to be Budi is ignored.
         Socket s = new Socket(lo, Hub.PORT);

@@ -27,6 +27,10 @@ final class Link {
     private final DataInputStream in;
     private final DataOutputStream out;
     private final LinkedBlockingQueue<Frame> queue = new LinkedBlockingQueue<Frame>();
+    // Photos and clip chunks wait here and go out only when no voice or chat is queued.
+    private final LinkedBlockingQueue<Frame> bulk = new LinkedBlockingQueue<Frame>();
+    // Put on the main queue to wake an idle writer when bulk work arrives; never sent.
+    private static final Frame WAKE = new Frame(Frame.PING, "", null);
     private volatile boolean closed;
     private Thread writer;
     volatile String peerName;
@@ -56,7 +60,12 @@ final class Link {
         if (closed) return;
         // Drop audio rather than build up delay when the radio link is slow.
         if (f.type == Frame.AUDIO && queue.size() > MAX_QUEUED_AUDIO) return;
-        queue.offer(f);
+        if (f.type == Frame.IMAGE || f.type == Frame.VIDEO_CHUNK) {
+            bulk.offer(f);
+            if (queue.isEmpty()) queue.offer(WAKE);
+        } else {
+            queue.offer(f);
+        }
     }
 
     boolean isClosed() { return closed; }
@@ -64,7 +73,10 @@ final class Link {
     private void writeLoop() {
         try {
             while (!closed) {
-                Frame f = queue.poll(PING_MS, TimeUnit.MILLISECONDS);
+                Frame f = queue.poll();
+                if (f == null) f = bulk.poll();
+                if (f == null) f = queue.poll(PING_MS, TimeUnit.MILLISECONDS);
+                if (f == WAKE) continue;
                 if (f == null) f = new Frame(Frame.PING, "", null);
                 out.writeByte(f.type);
                 out.writeUTF(f.sender);

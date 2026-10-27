@@ -28,6 +28,8 @@ final class Hub implements Link.Listener {
         void onPresence(String from, byte[] presence);
         void onAnnouncement(String from, String text);
         void onImage(String from, byte[] jpeg);
+        void onVideoIncoming(String from);
+        void onVideo(String from, byte[] mp4);
         void onRejected(String reason);
     }
 
@@ -38,6 +40,7 @@ final class Hub implements Link.Listener {
     private final Callback cb;
     private final List<Link> links = new CopyOnWriteArrayList<Link>();
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
+    private final Clips.Assembler clips = new Clips.Assembler();
     // Latest PRESENCE payload per member, replayed by the owner to phones that join later.
     private final Map<String, byte[]> presences = new LinkedHashMap<String, byte[]>();
     private volatile byte[] myPresence;
@@ -133,6 +136,13 @@ final class Hub implements Link.Listener {
         broadcast(new Frame(Frame.IMAGE, myName, jpeg), null);
     }
 
+    void sendVideo(byte[] mp4) {
+        int id = new java.util.Random().nextInt();
+        for (byte[] chunk : Clips.split(id, mp4)) {
+            broadcast(new Frame(Frame.VIDEO_CHUNK, myName, chunk), null);
+        }
+    }
+
     void sendAudio(byte[] pcm) {
         broadcast(new Frame(Frame.AUDIO, myName, pcm), null);
     }
@@ -210,6 +220,11 @@ final class Hub implements Link.Listener {
             case Frame.IMAGE:
                 cb.onImage(f.sender, f.payload);
                 break;
+            case Frame.VIDEO_CHUNK:
+                if (Clips.index(f.payload) == 0) cb.onVideoIncoming(f.sender);
+                byte[] clip = clips.add(f.sender, f.payload, System.currentTimeMillis());
+                if (clip != null) cb.onVideo(f.sender, clip);
+                break;
             case Frame.LEAVE:
                 removeMember(f.sender);
                 break;
@@ -249,6 +264,7 @@ final class Hub implements Link.Listener {
         boolean had;
         synchronized (members) { had = members.remove(name) != null; }
         synchronized (presences) { presences.remove(name); }
+        clips.drop(name);
         if (had) {
             cb.onTalkState(name, false);
             cb.onMemberLeft(name);
