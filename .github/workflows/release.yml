@@ -60,4 +60,13 @@ jobs:
             gh release create "$TAG" --target "$GITHUB_SHA" --title "Saling Jaga $VERSION" --latest \
               --notes "APK Saling Jaga $VERSION untuk Android 6.0 ke atas. Unduh **saling-jaga.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP."
           fi
-          gh release upload "$TAG" build/saling-jaga.apk --clobber
+          (cd build && sha256sum saling-jaga.apk > saling-jaga.apk.sha256)
+          SHA=$(cut -d' ' -f1 build/saling-jaga.apk.sha256)
+          CERT=$(apksigner verify --print-certs build/saling-jaga.apk | grep -m1 'SHA-256 digest' | sed 's/.*: //')
+          gh release upload "$TAG" build/saling-jaga.apk build/saling-jaga.apk.sha256 --clobber
+          gh release edit "$TAG" --notes "APK Saling Jaga $VERSION untuk Android 6.0 ke atas. Unduh **saling-jaga.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP.
+
+          ### Cek keaslian file
+          - SHA-256 APK: \`$SHA\`
+          - Sidik jari sertifikat penandatangan (SHA-256): \`$CERT\`
+          - Dibangun otomatis oleh GitHub Actions dari commit [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}), [log build](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."

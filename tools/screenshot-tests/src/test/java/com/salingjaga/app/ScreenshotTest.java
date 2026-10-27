@@ -37,6 +37,34 @@ public class ScreenshotTest {
         fo.close();
     }
 
+    /** Draws the activity dimmed, with the latest dialog on top, the way it looks on a phone. */
+    static void snapDialog(MainActivity a, String name) throws Exception {
+        ShadowLooper.idleMainLooper();
+        View root = a.getWindow().getDecorView();
+        int w = root.getWidth(), h = root.getHeight();
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        root.draw(c);
+        c.drawColor(0x99000000);
+        android.app.Dialog d = org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        View dv = d.getWindow().getDecorView();
+        float density = a.getResources().getDisplayMetrics().density;
+        int dw = w - Math.round(48 * density);
+        dv.measure(View.MeasureSpec.makeMeasureSpec(dw, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(h - Math.round(96 * density), View.MeasureSpec.AT_MOST));
+        dv.layout(0, 0, dv.getMeasuredWidth(), dv.getMeasuredHeight());
+        c.save();
+        c.translate((w - dw) / 2f, (h - dv.getMeasuredHeight()) / 2f);
+        dv.draw(c);
+        c.restore();
+        File out = new File(System.getProperty("shots.out"), name + ".png");
+        FileOutputStream fo = new FileOutputStream(out);
+        b.compress(Bitmap.CompressFormat.PNG, 100, fo);
+        fo.close();
+        d.dismiss();
+        ShadowLooper.idleMainLooper();
+    }
+
     static Object get(Object o, String f) throws Exception {
         Field x = o.getClass().getDeclaredField(f); x.setAccessible(true); return x.get(o);
     }
@@ -54,7 +82,13 @@ public class ScreenshotTest {
         return p.encode();
     }
 
+    static void freshInstall() {
+        org.robolectric.RuntimeEnvironment.getApplication()
+                .getSharedPreferences("salingjaga", 0).edit().clear().commit();
+    }
+
     MainActivity start() throws Exception {
+        freshInstall();
         MainActivity a = Robolectric.buildActivity(MainActivity.class).setup().get();
         org.robolectric.shadows.ShadowLooper.idleMainLooper(2, java.util.concurrent.TimeUnit.SECONDS);
         call(a, "saveProfile", new Class<?>[] {String.class, byte[].class}, "Chalid", null);
@@ -127,5 +161,56 @@ public class ScreenshotTest {
         call(m, "setMyStatus", new Class<?>[] {int.class}, Presence.SOS);
         m.onMemberLeft("Budi");
         snap(m, "4-sos-sendiri-dan-terputus");
+
+        MainActivity e = start();
+        snap(e, "6-layar-awal");
+
+        freshInstall();
+        org.robolectric.util.ReflectionHelpers.setStaticField(android.os.Build.class, "MODEL", "Galaxy A15");
+        MainActivity n = Robolectric.buildActivity(MainActivity.class).setup().get();
+        ShadowLooper.idleMainLooper(2, java.util.concurrent.TimeUnit.SECONDS);
+        snapDialog(n, "7-isi-nama-pertama-kali");
+
+        MainActivity d = group();
+        // Dialogs that need a live group check hub.hasPeers(): give the hub one loopback link.
+        java.net.ServerSocket ss = new java.net.ServerSocket(0);
+        java.net.Socket sock = new java.net.Socket("127.0.0.1", ss.getLocalPort());
+        ss.accept();
+        Hub dh = (Hub) get(d, "hub");
+        @SuppressWarnings("unchecked") List<Link> links = (List<Link>) get(dh, "links");
+        links.add(new Link(sock, dh));
+        call(d, "toggleSos", new Class<?>[0]);
+        snapDialog(d, "8-konfirmasi-sos-dan-sms");
+        call(d, "askStatus", new Class<?>[0]);
+        snapDialog(d, "9-pilih-status");
+        call(d, "askAnnouncement", new Class<?>[0]);
+        android.app.Dialog ann = org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        ((android.widget.EditText) findEdit(ann.getWindow().getDecorView()))
+                .setText("Semua kumpul di lapangan SD 2 sebelum jam 5 sore.");
+        snapDialog(d, "10-tulis-pengumuman");
+        a.getSharedPreferences("salingjaga", 0).edit().putString("sms_contacts", "081234567890,081398765432").apply();
+        call(d, "showProfileMenu", new Class<?>[0]);
+        snapDialog(d, "11-menu-profil");
+        call(d, "askEmergencyContacts", new Class<?>[] {Runnable.class}, (Object) null);
+        snapDialog(d, "12-kontak-darurat-sms");
+
+        MainActivity t = group();
+        set(t, "callMode", true);
+        call(t, "addSystemMessage", new Class<?>[] {String.class}, "Mode telepon aktif: mikrofon terus menyala.");
+        call(t, "refreshControls", new Class<?>[0]);
+        t.onTalkState("Sari", true);
+        snap(t, "13-mode-telepon");
+    }
+
+    static View findEdit(View v) {
+        if (v instanceof android.widget.EditText) return v;
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View r = findEdit(g.getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
     }
 }
