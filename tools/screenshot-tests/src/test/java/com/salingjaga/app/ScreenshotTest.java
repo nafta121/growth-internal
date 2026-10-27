@@ -200,6 +200,44 @@ public class ScreenshotTest {
         call(t, "refreshControls", new Class<?>[0]);
         t.onTalkState("Sari", true);
         snap(t, "13-mode-telepon");
+
+        MainActivity f = group();
+        f.onImage("Budi", sampleJpeg());
+        ShadowLooper.idleMainLooper();
+        call(f, "addBubble", new Class<?>[] {String.class, String.class, boolean.class},
+                "Chalid", "Jalan depan masjid masih bisa dilewati?", true);
+        f.onText("Budi", "Bisa, air setinggi lutut. Lewat kiri.");
+        ShadowLooper.idleMainLooper();
+        snap(f, "14-kirim-foto");
+    }
+
+    /** A simple drawn street scene standing in for a phone photo. */
+    static byte[] sampleJpeg() {
+        Bitmap b = Bitmap.createBitmap(1200, 900, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        p.setShader(new android.graphics.LinearGradient(0, 0, 0, 500, 0xFF9EC9E8, 0xFFDDEBF2,
+                android.graphics.Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, 1200, 560, p);
+        p.setShader(null);
+        p.setColor(0xFFB9A88F); c.drawRect(120, 260, 520, 600, p);
+        p.setColor(0xFF8C3B2E);
+        android.graphics.Path roof = new android.graphics.Path();
+        roof.moveTo(90, 270); roof.lineTo(320, 130); roof.lineTo(550, 270); roof.close();
+        c.drawPath(roof, p);
+        p.setColor(0xFFE8E2D5); c.drawRect(640, 220, 1080, 600, p);
+        p.setColor(0xFF2F6F4E); c.drawRect(780, 120, 940, 230, p);
+        p.setColor(0xFF5B4A3A);
+        for (int x = 680; x < 1060; x += 90) c.drawRect(x, 300, x + 50, 380, p);
+        p.setShader(new android.graphics.LinearGradient(0, 540, 0, 900, 0xFF9C8562, 0xFF6E5B40,
+                android.graphics.Shader.TileMode.CLAMP));
+        c.drawRect(0, 540, 1200, 900, p);
+        p.setShader(null);
+        p.setColor(0x55FFFFFF);
+        for (int y = 600; y < 900; y += 60) c.drawRect(40 + (y % 120), y, 360 + (y % 120), y + 6, p);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        b.compress(Bitmap.CompressFormat.JPEG, 80, out);
+        return out.toByteArray();
     }
 
     static View findEdit(View v) {

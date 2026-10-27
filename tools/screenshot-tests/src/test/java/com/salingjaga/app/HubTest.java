@@ -27,6 +27,7 @@ public class HubTest {
         public void onPresence(String f, byte[] p) { log.add("presence:" + f + ":" + Presence.decode(p).status); }
         public void onAnnouncement(String f, String t) { log.add("announce:" + f + ":" + t); }
         public void onRejected(String r) { log.add("rejected"); }
+        public void onImage(String f, byte[] j) { log.add("image:" + f + ":" + j.length); }
     }
 
     static void waitFor(Rec r, String entry) throws Exception {
@@ -61,6 +62,8 @@ public class HubTest {
         waitFor(rb, "announce:Pak RT:kumpul di SD 2");
         a.sendAudio(new byte[640]);
         waitFor(rb, "audio:Budi:640");
+        b.sendImage(new byte[300 * 1024]);
+        waitFor(ra, "image:Sari:" + (300 * 1024));   // a full-size photo is relayed whole
 
         // A raw client claiming to be Budi is ignored.
         Socket s = new Socket(lo, Hub.PORT);

@@ -23,7 +23,7 @@ Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang pali
 
 Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan perusahaan menjadi dasar model bisnisnya (lihat [Model keberlanjutan](#model-keberlanjutan)).
 
-> **Status:** MVP v0.6.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
+> **Status:** MVP v0.7.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
 
 ## Tampilan
 
@@ -43,9 +43,9 @@ Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan
 | --- | --- | --- |
 | <img src="docs/screenshots/3-sos-masuk.png" width="240"> | <img src="docs/screenshots/4-sos-sendiri-dan-terputus.png" width="240"> | <img src="docs/screenshots/5-kompas.png" width="240"> |
 
-| Menu profil | Kontak darurat SMS |   |
+| Menu profil | Kontak darurat SMS | Kirim foto |
 | --- | --- | --- |
-| <img src="docs/screenshots/11-menu-profil.png" width="240"> | <img src="docs/screenshots/12-kontak-darurat-sms.png" width="240"> |   |
+| <img src="docs/screenshots/11-menu-profil.png" width="240"> | <img src="docs/screenshots/12-kontak-darurat-sms.png" width="240"> | <img src="docs/screenshots/14-kirim-foto.png" width="240"> |
 
 Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#pengujian)). Nama dan pesan di dalamnya hanya contoh.
 
@@ -55,6 +55,7 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 - **Tahan untuk bicara**: walkie-talkie ke seluruh anggota grup.
 - **Mode telepon**: suara dua arah terus-menerus, dengan peredam gema dan derau bawaan HP.
 - **Chat teks** dan **Pengumuman**. Pengumuman berupa kartu kuning yang berbunyi di semua HP, cocok untuk info titik kumpul dari posko atau ketua rombongan.
+- **Kirim foto** dari kamera atau galeri. Foto dikecilkan otomatis (maks. 1280 px, di bawah 400 KB) supaya cepat terkirim, dan bisa diketuk untuk dilihat penuh. Kamera dibuka lewat aplikasi kamera HP, sehingga Saling Jaga tidak butuh izin kamera.
 - **Grup lebih dari 2 HP**. Satu HP menjadi pemilik grup dan meneruskan suara serta pesan ke semua anggota.
 
 **Keselamatan**
@@ -102,7 +103,7 @@ Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk a
   | Internet / jaringan | Membuka koneksi TCP ke HP lain di grup. Tidak dipakai untuk menghubungi server mana pun |
   | Getar, wake lock, layanan latar | Alarm SOS dan tetap tersambung saat layar mati |
 
-  Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto profil dipilih lewat pemilih foto bawaan Android, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
+  Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto dipilih lewat pemilih foto bawaan Android atau diambil lewat aplikasi kamera HP, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
 
 ## Cara pakai
 
@@ -128,7 +129,7 @@ Jangkauan Wi‑Fi Direct biasanya 50–100 m di area terbuka dan lebih pendek di
 ```
 
 - **Penemuan dan koneksi**: memakai `WifiP2pManager` bawaan Android, tanpa library pihak ketiga.
-- **Protokol**: frame biner sederhana di atas TCP, berisi `tipe · pengirim · panjang · isi`. Tipenya `HELLO` (nama + foto), `TEXT`, `AUDIO` (PCM 16 kHz mono, potongan 20 ms), `TALK_START/END`, `PRESENCE` (status, baterai, lokasi), `ANNOUNCE`, `LEAVE`, `PING`, dan `REJECT`.
+- **Protokol**: frame biner sederhana di atas TCP, berisi `tipe · pengirim · panjang · isi`. Tipenya `HELLO` (nama + foto), `TEXT`, `IMAGE` (JPEG), `AUDIO` (PCM 16 kHz mono, potongan 20 ms), `TALK_START/END`, `PRESENCE` (status, baterai, lokasi), `ANNOUNCE`, `LEAVE`, `PING`, dan `REJECT`.
 - **Relay**: pemilik grup meneruskan setiap frame ke anggota lain. Ia juga mengirim ulang daftar anggota dan status terakhir, termasuk SOS yang masih aktif, ke HP yang baru bergabung.
 - **Deteksi putus**: setiap koneksi mengirim `PING` tiap 3 detik. Koneksi yang diam lebih dari 10 detik dianggap putus.
 - **Latar belakang**: foreground service menahan CPU dan Wi‑Fi tetap aktif selama berada di grup.
@@ -203,6 +204,8 @@ app/src/main/
     Voice.java             rekam & putar suara (AudioRecord/AudioTrack)
     RadarView.java         radar kompas
     Avatars.java           foto profil bulat / inisial
+    Photos.java            kompres & decode foto yang dikirim di grup
+    CaptureProvider.java   file tujuan foto kamera (tanpa izin kamera)
     Alerts.java            notifikasi sistem
     EmergencySms.java      SOS lewat SMS: nomor kontak dan isi pesan
     KeepAliveService.java  tetap tersambung saat layar mati
