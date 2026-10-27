@@ -1,0 +1,56 @@
+name: Lapor masalah
+description: Aplikasi gagal terhubung, suara putus, tertutup sendiri, atau hal lain yang tidak berjalan.
+title: "[Masalah] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Terima kasih sudah mencoba Saling Jaga. Masalah Wi‑Fi Direct sering bergantung pada merek HP, jadi data perangkat sangat membantu.
+        Jangan tulis nomor telepon, alamat, atau data pribadi lain di sini, karena laporan ini bisa dilihat publik.
+  - type: textarea
+    id: apa
+    attributes:
+      label: Apa yang terjadi?
+      description: Ceritakan langkahnya. Kalau ada pesan galat, tulis persis atau lampirkan screenshot.
+      placeholder: "Saya ketuk Cari perangkat, lalu muncul 'Gagal menghubungi … (kode 2)'."
+    validations:
+      required: true
+  - type: textarea
+    id: harapan
+    attributes:
+      label: Apa yang seharusnya terjadi?
+  - type: input
+    id: hp
+    attributes:
+      label: Merek dan model HP
+      placeholder: "OPPO A17, Samsung A14, Xiaomi Redmi Note 12"
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Versi Android
+      description: Ada di Pengaturan → Tentang ponsel.
+      placeholder: "Android 13"
+    validations:
+      required: true
+  - type: input
+    id: versi
+    attributes:
+      label: Versi Saling Jaga
+      description: Ada di menu profil atau nama file APK.
+      placeholder: "0.10.0"
+  - type: input
+    id: lawan
+    attributes:
+      label: HP lain yang terlibat
+      description: Kalau masalahnya saat terhubung, sebutkan merek HP yang lain juga.
+  - type: dropdown
+    id: sering
+    attributes:
+      label: Seberapa sering?
+      options:
+        - Selalu
+        - Kadang-kadang
+        - Sekali saja

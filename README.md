@@ -230,6 +230,17 @@ tools/screenshot-tests/    tes protokol + render screenshot
 docs/                      situs web (index.html), logo, splash, screenshot
 ```
 
+## Masukan
+
+Sudah mencoba? Laporan dari HP asli adalah hal yang paling dibutuhkan sekarang.
+
+- **Lapor masalah** (gagal terhubung, suara putus, aplikasi tertutup): [buka formulir](https://github.com/chalidade/saling-jaga/issues/new?template=lapor-masalah.yml). Sebutkan merek HP dan versi Android.
+- **Usul fitur**: [buka formulir](https://github.com/chalidade/saling-jaga/issues/new?template=usul-fitur.yml).
+
+Jangan tulis nomor telepon atau data pribadi lain di laporan, karena laporan bisa dilihat publik.
+
+Website memakai statistik pengunjung [GoatCounter](https://www.goatcounter.com) bila diaktifkan: tanpa cookie dan tanpa data pribadi, hanya jumlah kunjungan dan klik tombol unduh. Aplikasinya sendiri tetap tanpa pelacak.
+
 ## Model keberlanjutan
 
 - **Warga**: gratis selamanya.

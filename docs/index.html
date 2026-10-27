@@ -3,8 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Saling Jaga · Komunikasi darurat tanpa sinyal</title>
-<meta name="description" content="Saling Jaga: telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal. Untuk bencana, pendakian, dan kegiatan di alam.">
+<title>Saling Jaga · Aplikasi komunikasi darurat tanpa sinyal dan internet</title>
+<meta name="description" content="Saling Jaga: aplikasi Android gratis untuk telepon, walkie-talkie, chat, foto, peta offline, dan SOS antar HP tanpa internet dan tanpa sinyal. Untuk bencana, pendakian, dan kegiatan di alam.">
+<link rel="canonical" href="https://chalidade.github.io/saling-jaga/">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Chalid Ade Rahman">
+<!-- Google Search Console: tempel kode verifikasi di content, lalu hapus komentar ini. -->
+<!-- <meta name="google-site-verification" content=""> -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Saling Jaga",
+  "alternateName": "SalingJaga",
+  "description": "Aplikasi komunikasi darurat offline untuk Android: telepon, walkie-talkie, chat, foto, video, peta offline, kompas, dan SOS lewat Wi-Fi Direct tanpa internet dan tanpa sinyal.",
+  "url": "https://chalidade.github.io/saling-jaga/",
+  "downloadUrl": "https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk",
+  "image": "https://chalidade.github.io/saling-jaga/og.png",
+  "screenshot": "https://chalidade.github.io/saling-jaga/screenshots/2-grup-dan-chat.png",
+  "applicationCategory": "CommunicationApplication",
+  "operatingSystem": "Android 6.0+",
+  "inLanguage": "id",
+  "isAccessibleForFree": true,
+  "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "IDR" },
+  "author": { "@type": "Person", "name": "Chalid Ade Rahman", "url": "https://github.com/chalidade" }
+}
+</script>
 <meta property="og:title" content="Saling Jaga">
 <meta property="og:description" content="Telepon, walkie-talkie, chat, dan SOS antar HP Android tanpa internet dan tanpa sinyal.">
 <meta property="og:type" content="website">
@@ -142,6 +167,8 @@
   .plans h3 { margin: 0; font-size: 18px; }
   .plans .price { color: var(--brand); font-weight: 700; margin: 2px 0 10px; }
   .plans p { margin: 0; color: var(--muted); font-size: 16px; }
+  .feedback { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .feedback p + p { margin-top: 14px; }
   @media (max-width: 760px) { .plans { grid-template-columns: 1fr; } .plans div { padding: 20px 0; border-bottom: 1px solid var(--line); } }
 
   .end { padding: 120px 0 96px; display: grid; grid-template-columns: 180px 1fr; gap: 48px; align-items: center; }
@@ -160,6 +187,18 @@
   footer { border-top: 1px solid var(--line); padding: 24px 0 40px; font-size: 14px; color: var(--muted); }
   footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
 </style>
+<script>
+  // Statistik pengunjung ramah privasi (GoatCounter): tanpa cookie, tanpa data pribadi.
+  // Kosong = mati. Isi dengan kode akun, misal "salingjaga" untuk salingjaga.goatcounter.com.
+  var GOATCOUNTER = '';
+  if (GOATCOUNTER) {
+    var gc = document.createElement('script');
+    gc.async = true;
+    gc.src = 'https://gc.zgo.at/count.js';
+    gc.setAttribute('data-goatcounter', 'https://' + GOATCOUNTER + '.goatcounter.com/count');
+    document.head.appendChild(gc);
+  }
+</script>
 </head>
 <body>
 
@@ -171,8 +210,9 @@
       <a class="opt" href="#fitur">Fitur</a>
       <a class="opt" href="#instal">Instal</a>
       <a class="opt" href="#keamanan">Keamanan</a>
+      <a class="opt" href="#masukan">Masukan</a>
       <a class="opt" href="https://github.com/chalidade/saling-jaga">GitHub</a>
-      <a class="btn btn-dark" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">Unduh</a>
+      <a class="btn btn-dark" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk" data-goatcounter-click="unduh-apk-1" data-goatcounter-title="Unduh APK">Unduh</a>
     </div>
   </nav>
 
@@ -181,7 +221,7 @@
       <h1>Tetap bisa saling kabar saat <em>sinyal hilang.</em></h1>
       <p class="lead">Saling Jaga menghubungkan HP Android langsung satu sama lain lewat Wi‑Fi Direct. Bicara, kirim pesan, bagikan lokasi, dan kirim SOS ke rombongan, tanpa internet, pulsa, atau BTS.</p>
       <div class="actions">
-        <a class="btn btn-dark" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">Unduh APK</a>
+        <a class="btn btn-dark" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk" data-goatcounter-click="unduh-apk-2" data-goatcounter-title="Unduh APK">Unduh APK</a>
         <a class="btn btn-line" href="#instal">Cara instal</a>
       </div>
       <p class="meta">Gratis untuk warga. Kode terbuka di GitHub.</p>
@@ -312,7 +352,7 @@
         <div>
           <h3>Instal</h3>
           <ol class="steps">
-            <li>Buka halaman ini di HP Android, lalu ketuk <a href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk"><b>Unduh APK</b></a>.</li>
+            <li>Buka halaman ini di HP Android, lalu ketuk <a href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk" data-goatcounter-click="unduh-apk-3" data-goatcounter-title="Unduh APK"><b>Unduh APK</b></a>.</li>
             <li>Jika browser memperingatkan, pilih <b>Tetap unduh</b>.</li>
             <li>Buka <b>saling-jaga.apk</b> dari notifikasi unduhan.</li>
             <li>Jika muncul “Instal aplikasi tidak dikenal”, buka <b>Setelan</b> dan aktifkan <b>Izinkan dari sumber ini</b>.</li>
@@ -382,8 +422,27 @@
     </details>
     <details>
       <summary>Apakah sudah siap dipakai saat bencana sungguhan?</summary>
-      <p>Saling Jaga masih versi awal. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di banyak merek HP. Coba dulu bersama keluarga atau rombongan, lalu kirim masukan lewat GitHub.</p>
+      <p>Saling Jaga masih versi awal. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di banyak merek HP. Coba dulu bersama keluarga atau rombongan, lalu kirim masukan lewat <a href="#masukan">bagian Masukan</a>.</p>
     </details>
+  </section>
+
+  <section id="masukan">
+    <p class="label">Masukan</p>
+    <h2>Sudah coba? Ceritakan hasilnya.</h2>
+    <p class="intro">Saling Jaga dibuat bersama penggunanya. Setiap laporan, terutama soal merek HP yang gagal terhubung, langsung masuk ke daftar perbaikan.</p>
+    <div class="plans feedback">
+      <div id="form-card" hidden><h3>Beri rating</h3><p>Formulir singkat 1 menit: nilai 1–5, merek HP, dan apa yang perlu diperbaiki. Tidak perlu akun.</p><p><a class="btn btn-dark" id="form-link" href="#" data-goatcounter-click="form-masukan">Isi formulir</a></p></div>
+      <div><h3>Lapor masalah</h3><p>Gagal terhubung, suara putus, atau aplikasi tertutup sendiri? Sebutkan merek HP dan versi Android.</p><p><a class="btn btn-line" href="https://github.com/chalidade/saling-jaga/issues/new?template=lapor-masalah.yml" data-goatcounter-click="lapor-masalah">Lapor di GitHub</a></p></div>
+      <div><h3>Usul fitur</h3><p>Punya ide yang membantu rombongan, posko, atau keluarga Anda? Tulis kebutuhannya, bukan hanya solusinya.</p><p><a class="btn btn-line" href="https://github.com/chalidade/saling-jaga/issues/new?template=usul-fitur.yml" data-goatcounter-click="usul-fitur">Usulkan</a></p></div>
+    </div>
+    <script>
+      // Isi dengan tautan Google Form untuk menampilkan kartu "Beri rating".
+      var FORM_URL = '';
+      if (FORM_URL) {
+        document.getElementById('form-link').href = FORM_URL;
+        document.getElementById('form-card').hidden = false;
+      }
+    </script>
   </section>
 
   <section>
@@ -403,7 +462,7 @@
       <h2>Aplikasi ini hanya berguna kalau HP di sekitar Anda juga punya.</h2>
       <p>Pasang hari ini, lalu bagikan ke keluarga, tetangga, dan rombongan.</p>
       <div class="actions">
-        <a class="btn btn-dark" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk">Unduh APK</a>
+        <a class="btn btn-dark" href="https://github.com/chalidade/saling-jaga/releases/latest/download/saling-jaga.apk" data-goatcounter-click="unduh-apk-4" data-goatcounter-title="Unduh APK">Unduh APK</a>
         <a class="btn btn-line" href="https://github.com/chalidade/saling-jaga">Lihat kode di GitHub</a>
       </div>
     </div>
