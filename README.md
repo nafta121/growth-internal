@@ -22,13 +22,25 @@ Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan
 
 ## Tampilan
 
-| Splash | Cari perangkat | Grup & chat |
+| Pembuka | Layar awal | Isi nama pertama kali |
 | --- | --- | --- |
-| <img src="docs/screenshots/0-splash.png" width="240"> | <img src="docs/screenshots/1-cari-perangkat.png" width="240"> | <img src="docs/screenshots/2-grup-dan-chat.png" width="240"> |
+| <img src="docs/screenshots/0-splash.png" width="240"> | <img src="docs/screenshots/6-layar-awal.png" width="240"> | <img src="docs/screenshots/7-isi-nama-pertama-kali.png" width="240"> |
+
+| Cari perangkat | Grup & chat | Mode telepon |
+| --- | --- | --- |
+| <img src="docs/screenshots/1-cari-perangkat.png" width="240"> | <img src="docs/screenshots/2-grup-dan-chat.png" width="240"> | <img src="docs/screenshots/13-mode-telepon.png" width="240"> |
+
+| Pilih status | Tulis pengumuman | Kirim SOS / SOS + SMS |
+| --- | --- | --- |
+| <img src="docs/screenshots/9-pilih-status.png" width="240"> | <img src="docs/screenshots/10-tulis-pengumuman.png" width="240"> | <img src="docs/screenshots/8-konfirmasi-sos-dan-sms.png" width="240"> |
 
 | SOS masuk | SOS sendiri & anggota terputus | Kompas |
 | --- | --- | --- |
 | <img src="docs/screenshots/3-sos-masuk.png" width="240"> | <img src="docs/screenshots/4-sos-sendiri-dan-terputus.png" width="240"> | <img src="docs/screenshots/5-kompas.png" width="240"> |
+
+| Menu profil | Kontak darurat SMS |   |
+| --- | --- | --- |
+| <img src="docs/screenshots/11-menu-profil.png" width="240"> | <img src="docs/screenshots/12-kontak-darurat-sms.png" width="240"> |   |
 
 Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#pengujian)). Nama dan pesan di dalamnya hanya contoh.
 
@@ -66,6 +78,26 @@ Saling Jaga belum ada di Play Store, jadi dipasang langsung dari file APK (sekit
 Untuk anggota rombongan yang tidak punya internet, kirim file APK dari HP yang sudah memasangnya lewat Quick Share / Nearby Share, Bluetooth, atau kabel data.
 
 > Selama aplikasi belum memakai kunci rilis permanen, APK versi baru mungkin menolak dipasang di atas versi lama ("Aplikasi tidak terpasang"). Hapus dulu versi lama, lalu pasang lagi.
+
+## Apakah aman dipasang di luar Play Store?
+
+Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk aplikasi yang aman. Cara memastikan APK Saling Jaga bisa dipercaya:
+
+- **Kodenya terbuka.** Semua kode ada di repositori ini dan bisa diperiksa siapa pun. Aplikasinya kecil (sekitar 200 KB) dan tidak memakai library pihak ketiga, jadi tidak ada kode tersembunyi dari SDK iklan atau analitik.
+- **APK dibangun oleh GitHub, bukan di laptop pribadi.** File di halaman [Releases](https://github.com/chalidade/saling-jaga/releases) dibuat otomatis oleh GitHub Actions dari kode publik. Setiap rilis mencantumkan commit asal dan link ke log build-nya.
+- **Cek keaslian file.** Setiap rilis mencantumkan SHA-256 APK dan sidik jari sertifikat penandatangan. File yang diunduh dari sumber lain (grup WhatsApp, Bluetooth) bisa dicocokkan dengan angka ini. File juga bisa dipindai gratis di [VirusTotal](https://www.virustotal.com).
+- **Tidak mengirim data ke internet.** Tidak ada server, akun, iklan, atau pelacak. Data hanya dikirim langsung ke HP anggota grup lewat Wi‑Fi Direct.
+- **Izin seperlunya:**
+
+  | Izin | Untuk apa |
+  | --- | --- |
+  | Lokasi / Perangkat sekitar | Wajib dari Android untuk mencari HP lewat Wi‑Fi Direct, dan untuk kompas serta jarak SOS |
+  | Mikrofon | Walkie-talkie dan mode telepon, hanya saat tombol ditahan atau telepon aktif |
+  | Notifikasi | SOS dan pesan saat layar mati |
+  | Internet / jaringan | Membuka koneksi TCP ke HP lain di grup. Tidak dipakai untuk menghubungi server mana pun |
+  | Getar, wake lock, layanan latar | Alarm SOS dan tetap tersambung saat layar mati |
+
+  Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto profil dipilih lewat pemilih foto bawaan Android, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
 
 ## Cara pakai
 
@@ -107,7 +139,7 @@ Yang sudah diterapkan:
 Belum ada (direncanakan):
 - **Identitas terverifikasi**: kunci digital per HP, kode pendek `SJ-XXXX-XXXX` + QR untuk pendataan, dan label "Posko terverifikasi" untuk pengumuman resmi.
 - **Enkripsi ujung ke ujung** dengan kunci grup.
-- Kunci rilis permanen. Saat ini APK masih ditandatangani dengan kunci debug.
+- Kunci rilis permanen. Selama secret kunci rilis belum diisi, APK ditandatangani dengan kunci sementara yang bisa berbeda di tiap rilis.
 
 ## Batasan saat ini
 
