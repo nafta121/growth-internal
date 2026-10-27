@@ -42,6 +42,7 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 
 **Keselamatan**
 - **SOS**: semua HP membunyikan alarm keras dan bergetar. Muncul juga kartu merah berisi jarak dan arah ke pengirim, misalnya "259 m ke arah barat laut". SOS tetap aktif sampai pengirim membatalkannya, dan anggota yang baru bergabung tetap melihatnya.
+- **SOS + SMS**: cadangan saat BTS masih hidup tapi tidak ada kuota internet. Aplikasi menyiapkan SMS berisi link lokasi Google Maps dan baterai ke maksimal 3 kontak darurat (atur di menu profil), lalu Anda tinggal menekan kirim. Tidak butuh izin SMS.
 - **Status diri**: Aman / Butuh bantuan / Terluka. Status ini tampil di bawah foto tiap anggota bersama **level baterai**.
 - **Kompas**: radar yang menunjukkan posisi tiap anggota sesuai arah aslinya dan ikut berputar saat HP diputar. GPS bekerja tanpa internet.
 - **Peringatan anggota terputus**: kalau ada HP yang keluar jangkauan atau mati, semua anggota tahu dalam sekitar 10 detik lewat getar, bunyi, dan banner.
@@ -143,6 +144,7 @@ Kodenya ditulis dalam Java 8 dengan UI yang dibangun langsung di kode (tanpa XML
 cd tools/screenshot-tests && gradle test
 ```
 
+- `EmergencySmsTest` menguji pembersihan nomor kontak darurat dan isi SMS SOS.
 - `HubTest` menjalankan tiga hub di atas socket sungguhan. Yang diuji: relay pesan, teks, dan suara; pengiriman ulang SOS ke anggota baru; penolakan penyamaran; batas ukuran pesan; penolakan nama ganda; dan deteksi anggota keluar.
 - `ScreenshotTest` merender layar aplikasi dengan Robolectric (native graphics) ke `tools/screenshot-tests/out/`. Gambar di README berasal dari tes ini.
 
@@ -166,6 +168,7 @@ app/src/main/
     RadarView.java         radar kompas
     Avatars.java           foto profil bulat / inisial
     Alerts.java            notifikasi sistem
+    EmergencySms.java      SOS lewat SMS: nomor kontak dan isi pesan
     KeepAliveService.java  tetap tersambung saat layar mati
   res/                     ikon, logo, splash, ikon vektor
 build.sh                   build APK tanpa Gradle

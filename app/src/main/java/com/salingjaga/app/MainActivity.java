@@ -875,7 +875,9 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
         new AlertDialog.Builder(this)
                 .setTitle("Kirim SOS?")
-                .setMessage("Semua anggota grup akan mendengar alarm dan melihat lokasimu sampai SOS dibatalkan.")
+                .setMessage("Semua anggota grup akan mendengar alarm dan melihat lokasimu sampai SOS dibatalkan.\n\n"
+                        + "SOS + SMS juga menyiapkan SMS berisi lokasimu ke kontak darurat. "
+                        + "SMS butuh sinyal operator, tapi tidak butuh kuota internet.")
                 .setPositiveButton("Kirim SOS", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
                         statusBeforeSos = me.status;
@@ -883,6 +885,68 @@ public class MainActivity extends Activity implements Hub.Callback {
                         addSystemMessage(hub != null && hub.hasPeers()
                                 ? "SOS terkirim ke semua anggota."
                                 : "SOS aktif. Akan terkirim begitu tersambung ke HP lain.");
+                    }
+                })
+                .setNeutralButton("SOS + SMS", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        statusBeforeSos = me.status;
+                        setMyStatus(Presence.SOS);
+                        sendSosSms();
+                    }
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    private List<String> emergencyContacts() {
+        return EmergencySms.parseNumbers(prefs.getString("sms_contacts", ""));
+    }
+
+    /** SMS goes over the carrier network: useful when towers still work but there is no data. */
+    private void sendSosSms() {
+        final List<String> to = emergencyContacts();
+        if (to.isEmpty()) {
+            askEmergencyContacts(new Runnable() {
+                @Override public void run() { if (!emergencyContacts().isEmpty()) sendSosSms(); }
+            });
+            return;
+        }
+        Presence p = buildPresence();
+        boolean has = myLocation != null;
+        long age = has ? (System.currentTimeMillis() - myLocation.getTime()) / 60000 : -1;
+        String body = EmergencySms.body(myName, has,
+                has ? myLocation.getLatitude() : 0, has ? myLocation.getLongitude() : 0,
+                has ? myLocation.getAccuracy() : 0, age, p.battery);
+        Intent i = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + EmergencySms.join(to, ";")));
+        i.putExtra("sms_body", body);
+        try {
+            startActivity(i);
+            addSystemMessage("Pesan SOS disiapkan di aplikasi SMS. Tekan kirim di sana. "
+                    + "SMS hanya terkirim jika masih ada sinyal operator.");
+        } catch (RuntimeException e) {
+            toast("Tidak ada aplikasi SMS");
+        }
+    }
+
+    private void askEmergencyContacts(final Runnable then) {
+        final EditText e = new EditText(this);
+        e.setHint("Contoh: 0812xxxx, 0813xxxx");
+        e.setInputType(InputType.TYPE_CLASS_PHONE);
+        e.setText(EmergencySms.join(emergencyContacts(), ", "));
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+        box.addView(e);
+        new AlertDialog.Builder(this)
+                .setTitle("Kontak darurat (maks. " + EmergencySms.MAX_CONTACTS + ")")
+                .setMessage("Nomor keluarga atau posko yang menerima SMS berisi lokasimu saat SOS. "
+                        + "Pisahkan dengan koma.")
+                .setView(box)
+                .setPositiveButton("Simpan", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        List<String> n = EmergencySms.parseNumbers(e.getText().toString());
+                        prefs.edit().putString("sms_contacts", EmergencySms.join(n, ",")).apply();
+                        toast(n.isEmpty() ? "Kontak darurat dikosongkan" : n.size() + " kontak darurat disimpan");
+                        if (then != null) then.run();
                     }
                 })
                 .setNegativeButton("Batal", null)
@@ -1183,10 +1247,12 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void showProfileMenu() {
         final boolean sharing = shareLocation();
+        int contacts = emergencyContacts().size();
         String[] items = {"Ganti foto", "Ganti nama",
                 sharing ? "Bagikan lokasi: Nyala (ketuk untuk mematikan)" : "Bagikan lokasi: Mati (ketuk untuk menyalakan)",
+                contacts == 0 ? "Kontak darurat SMS: belum diatur" : "Kontak darurat SMS: " + contacts + " nomor",
                 myPhoto == null ? null : "Hapus foto"};
-        if (items[3] == null) items = new String[] {items[0], items[1], items[2]};
+        if (items[4] == null) items = new String[] {items[0], items[1], items[2], items[3]};
         new AlertDialog.Builder(this)
                 .setTitle(myName)
                 .setItems(items, new DialogInterface.OnClickListener() {
@@ -1194,6 +1260,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                         if (which == 0) pickPhoto();
                         else if (which == 1) askName();
                         else if (which == 2) setShareLocation(!sharing);
+                        else if (which == 3) askEmergencyContacts(null);
                         else saveProfile(myName, null);
                     }
                 })
