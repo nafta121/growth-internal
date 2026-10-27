@@ -63,6 +63,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -137,6 +138,10 @@ public class MainActivity extends Activity implements Hub.Callback {
     private float heading;
     private RadarView radar;
     private View compassPage;
+    private View mapPage;
+    private MapView mapView;
+    private TextView mapStatus, mapDownload;
+    private volatile boolean mapDownloading;
     private LinearLayout compassList;
     private TextView compassHint;
 
@@ -194,6 +199,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         frame.addView(buildUi());
         compassPage = buildCompass();
         frame.addView(compassPage);
+        mapPage = buildMap();
+        frame.addView(mapPage);
         if (state == null) {
             frame.addView(buildSplash());
             w.setStatusBarColor(BRAND);
@@ -255,7 +262,8 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     @Override public void onBackPressed() {
-        if (compassPage.getVisibility() == View.VISIBLE) hideCompass();
+        if (mapPage.getVisibility() == View.VISIBLE) mapPage.setVisibility(View.GONE);
+        else if (compassPage.getVisibility() == View.VISIBLE) hideCompass();
         else super.onBackPressed();
     }
 
@@ -517,6 +525,13 @@ public class MainActivity extends Activity implements Hub.Callback {
         LinearLayout.LayoutParams kl = wrap();
         kl.leftMargin = dp(8);
         chips.addView(compass, kl);
+        TextView map = chip("Peta", ACCENT, ACCENT_SOFT);
+        map.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showMap(); }
+        });
+        LinearLayout.LayoutParams ml = wrap();
+        ml.leftMargin = dp(8);
+        chips.addView(map, ml);
         LinearLayout.LayoutParams cl = wrap();
         cl.leftMargin = dp(8);
         chips.addView(statusChip, cl);
@@ -1515,6 +1530,167 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
     }
 
+    // ----------------------------------------------------------- offline map
+
+    private File tileRoot() {
+        return new File(getFilesDir(), "tiles");
+    }
+
+    private View buildMap() {
+        LinearLayout page = column();
+        page.setBackgroundColor(BG);
+        page.setClickable(true);
+        page.setPadding(dp(14), dp(8), dp(14), dp(12));
+        LinearLayout head = row();
+        LinearLayout titles = column();
+        titles.addView(text("Peta offline", 20, TEXT, true));
+        titles.addView(text("Posisi anggota yang membagikan lokasi", 13, SUB, false));
+        head.addView(titles, grow());
+        TextView close = text("Tutup", 14, ACCENT, true);
+        close.setPadding(dp(14), dp(8), dp(14), dp(8));
+        close.setBackground(pressable(shape(ACCENT_SOFT, 18, 0)));
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { mapPage.setVisibility(View.GONE); }
+        });
+        head.addView(close);
+        page.addView(head, fill());
+
+        FrameLayout box = new FrameLayout(this);
+        box.setBackground(shape(CARD, 18, LINE));
+        box.setClipToOutline(true);
+        mapView = new MapView(this, tileRoot(), TEXT, SUB, ACCENT);
+        box.addView(mapView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout zoom = column();
+        zoom.addView(mapButton("+", new View.OnClickListener() {
+            @Override public void onClick(View v) { mapView.zoomBy(1); }
+        }));
+        zoom.addView(mapButton("−", new View.OnClickListener() {
+            @Override public void onClick(View v) { mapView.zoomBy(-1); }
+        }), gapTop(lp(dp(42), dp(42)), 8));
+        zoom.addView(mapButton("◎", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (myLocation != null) mapView.centerOn(myLocation.getLatitude(), myLocation.getLongitude());
+                else toast("Posisimu belum diketahui. Tunggu GPS di tempat terbuka.");
+            }
+        }), gapTop(lp(dp(42), dp(42)), 8));
+        FrameLayout.LayoutParams zl = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END | Gravity.TOP);
+        zl.setMargins(0, dp(10), dp(10), 0);
+        box.addView(zoom, zl);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1);
+        bl.topMargin = dp(10);
+        page.addView(box, bl);
+
+        LinearLayout foot = row();
+        mapStatus = text("", 13, SUB, false);
+        foot.addView(mapStatus, grow());
+        mapDownload = text("Unduh peta sekitar", 14, Color.WHITE, true);
+        mapDownload.setPadding(dp(14), dp(9), dp(14), dp(9));
+        mapDownload.setBackground(pressable(shape(ACCENT, 18, 0)));
+        mapDownload.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { askDownloadMap(); }
+        });
+        LinearLayout.LayoutParams dl = wrap();
+        dl.leftMargin = dp(10);
+        foot.addView(mapDownload, dl);
+        page.addView(foot, gapTop(fill(), 10));
+        page.setVisibility(View.GONE);
+        return page;
+    }
+
+    private View mapButton(String label, View.OnClickListener l) {
+        TextView b = text(label, 20, TEXT, true);
+        b.setGravity(Gravity.CENTER);
+        b.setBackground(pressable(ovalStroke(CARD, LINE)));
+        b.setElevation(dp(2));
+        b.setOnClickListener(l);
+        b.setLayoutParams(lp(dp(42), dp(42)));
+        return b;
+    }
+
+    private void showMap() {
+        startLocation();
+        mapPage.setVisibility(View.VISIBLE);
+        refreshMap();
+        refreshMapStatus();
+    }
+
+    private void refreshMap() {
+        if (mapPage == null || mapPage.getVisibility() != View.VISIBLE) return;
+        List<RadarView.Target> targets = new ArrayList<RadarView.Target>();
+        for (Map.Entry<String, byte[]> e : members.entrySet()) {
+            Presence p = presences.get(e.getKey());
+            if (p == null || !p.hasLocation) continue;
+            targets.add(new RadarView.Target(e.getKey(), Avatars.circle(e.getKey(), e.getValue(), dp(38)),
+                    statusColor(p.status), p.lat, p.lon));
+        }
+        mapView.setData(shareLocation() ? myLocation : null, targets);
+    }
+
+    private void refreshMapStatus() {
+        if (mapDownloading) return;
+        int n = Tiles.count(tileRoot());
+        mapStatus.setText(n == 0 ? "Belum ada peta tersimpan. Unduh saat masih ada internet."
+                : "Peta tersimpan: " + n + " petak. Bisa dipakai tanpa internet.");
+    }
+
+    private void askDownloadMap() {
+        if (mapDownloading) return;
+        final boolean here = myLocation != null;
+        final double lat = here ? myLocation.getLatitude() : mapView.centerLat();
+        final double lon = here ? myLocation.getLongitude() : mapView.centerLon();
+        final List<int[]> plan = Tiles.plan(lat, lon);
+        new AlertDialog.Builder(this)
+                .setTitle("Unduh peta sekitar")
+                .setMessage("Peta jalan radius ±" + (int) Tiles.RADIUS_KM + " km di sekitar "
+                        + (here ? "posisimu" : "tengah peta") + " (" + plan.size() + " petak, sekitar "
+                        + Math.max(1, plan.size() * 15 / 1024) + " MB).\n\n"
+                        + "Butuh internet, jadi lakukan sekarang selagi ada sinyal. Setelah tersimpan, "
+                        + "peta bisa dibuka tanpa internet. Data peta © OpenStreetMap contributors.")
+                .setPositiveButton("Unduh", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { downloadMap(plan); }
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    private void downloadMap(final List<int[]> plan) {
+        mapDownloading = true;
+        mapDownload.setEnabled(false);
+        mapDownload.setAlpha(0.5f);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final int failed = Tiles.download(tileRoot(), plan, new Tiles.Progress() {
+                    @Override public boolean onTile(final int done, final int total) {
+                        if (done % 5 == 0 || done == total) {
+                            ui.post(new Runnable() {
+                                @Override public void run() {
+                                    mapStatus.setText("Mengunduh peta " + done + "/" + total + "…");
+                                    mapView.reload();
+                                }
+                            });
+                        }
+                        return !isFinishing();
+                    }
+                });
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        mapDownloading = false;
+                        mapDownload.setEnabled(true);
+                        mapDownload.setAlpha(1f);
+                        mapView.reload();
+                        refreshMapStatus();
+                        if (failed == plan.size()) toast("Peta gagal diunduh. Cek koneksi internet.");
+                        else if (failed > 0) toast(failed + " petak gagal diunduh. Coba lagi saat sinyal lebih baik.");
+                        else toast("Peta tersimpan untuk dipakai tanpa internet");
+                    }
+                });
+            }
+        }, "map-download").start();
+    }
+
     // ----------------------------------------------------------- compass
 
     private View buildCompass() {
@@ -1564,6 +1740,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void refreshCompass() {
+        refreshMap();
         if (compassPage.getVisibility() != View.VISIBLE) return;
         List<RadarView.Target> targets = new ArrayList<RadarView.Target>();
         compassList.removeAllViews();

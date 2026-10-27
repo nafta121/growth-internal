@@ -261,6 +261,7 @@
       <dl>
         <div class="row"><dt class="sos">SOS</dt><dd>Alarm keras dan getar di semua HP, lengkap dengan jarak dan arah ke pengirim. Tetap aktif sampai pengirim membatalkannya.</dd></div>
         <div class="row"><dt>SOS + SMS</dt><dd>Jika BTS masih hidup tapi tidak ada kuota, SMS berisi link lokasi dan baterai disiapkan untuk maksimal 3 kontak darurat.</dd></div>
+        <div class="row"><dt>Peta offline</dt><dd>Unduh peta jalan sekitar (±3 km) selagi ada internet. Setelah itu peta dan posisi tiap anggota tampil tanpa internet, dengan SOS ditandai merah.</dd></div>
         <div class="row"><dt>Kompas anggota</dt><dd>Radar yang menunjukkan arah dan jarak setiap anggota. GPS tetap bekerja tanpa internet.</dd></div>
         <div class="row"><dt>Status dan baterai</dt><dd>Aman, butuh bantuan, atau terluka, tampil di bawah foto setiap anggota bersama sisa baterai.</dd></div>
         <div class="row"><dt>Jembatan (percobaan)</dt><dd>Satu HP di tengah bisa menjadi jembatan, sehingga HP yang lebih jauh tetap tersambung ke grup. Jembatan bisa disambung berantai.</dd></div>
@@ -280,11 +281,13 @@
     <p class="intro">Dirender langsung dari kode aplikasi. Geser untuk melihat semua layar. Nama dan pesan di dalamnya hanya contoh.</p>
     <div class="screens">
       <figure><img src="screenshots/2-grup-dan-chat.png" alt="" loading="lazy"><figcaption>Grup dan chat</figcaption></figure>
+      <figure><img src="screenshots/16-peta-offline.png" alt="" loading="lazy"><figcaption>Peta offline</figcaption></figure>
       <figure><img src="screenshots/14-kirim-foto.png" alt="" loading="lazy"><figcaption>Kirim foto</figcaption></figure>
       <figure><img src="screenshots/15-kirim-video.png" alt="" loading="lazy"><figcaption>Kirim video</figcaption></figure>
       <figure><img src="screenshots/13-mode-telepon.png" alt="" loading="lazy"><figcaption>Mode telepon</figcaption></figure>
       <figure><img src="screenshots/3-sos-masuk.png" alt="" loading="lazy"><figcaption>SOS masuk</figcaption></figure>
       <figure><img src="screenshots/5-kompas.png" alt="" loading="lazy"><figcaption>Kompas</figcaption></figure>
+      <figure><img src="screenshots/17-jadi-jembatan.png" alt="" loading="lazy"><figcaption>Jadi jembatan (multihop)</figcaption></figure>
       <figure><img src="screenshots/8-konfirmasi-sos-dan-sms.png" alt="" loading="lazy"><figcaption>Kirim SOS / SOS + SMS</figcaption></figure>
       <figure><img src="screenshots/4-sos-sendiri-dan-terputus.png" alt="" loading="lazy"><figcaption>SOS sendiri dan anggota terputus</figcaption></figure>
       <figure><img src="screenshots/9-pilih-status.png" alt="" loading="lazy"><figcaption>Pilih status</figcaption></figure>
@@ -341,7 +344,7 @@
       <ul>
         <li><b>Kode terbuka.</b> Semua kode ada di GitHub, tanpa library iklan, analitik, atau pelacak.</li>
         <li><b>Dibangun oleh GitHub, bukan di laptop pribadi.</b> Setiap rilis mencantumkan commit asal, log build, SHA-256 file, dan sidik jari sertifikat untuk dicocokkan.</li>
-        <li><b>Tidak mengirim data ke internet.</b> Tidak ada server dan tidak ada akun. Data hanya berpindah ke HP anggota grup, terenkripsi WPA2 Wi‑Fi Direct.</li>
+        <li><b>Tidak mengirim data ke internet.</b> Tidak ada server dan tidak ada akun. Data hanya berpindah ke HP anggota grup, terenkripsi WPA2 Wi‑Fi Direct. Internet hanya dipakai saat kamu menekan Unduh peta, untuk mengambil gambar peta OpenStreetMap.</li>
         <li><b>Tidak bisa menyamar.</b> Pemilik grup menolak pesan yang mengaku dari anggota lain, jadi tidak ada SOS palsu atas nama orang lain.</li>
         <li>File bisa dipindai gratis di <a href="https://www.virustotal.com">VirusTotal</a> sebelum dipasang.</li>
       </ul>
@@ -363,7 +366,7 @@
     <h2>Pertanyaan yang sering muncul.</h2>
     <details>
       <summary>Benar-benar tidak butuh internet atau pulsa?</summary>
-      <p>Benar. Data seluler boleh mati dan HP boleh tanpa kartu SIM. Yang perlu menyala hanya Wi‑Fi dan Lokasi. Internet hanya dibutuhkan sekali, saat mengunduh APK. Fitur SOS + SMS memakai pulsa SMS biasa dan butuh BTS yang masih hidup.</p>
+      <p>Benar. Data seluler boleh mati dan HP boleh tanpa kartu SIM. Yang perlu menyala hanya Wi‑Fi dan Lokasi. Internet hanya dibutuhkan saat mengunduh APK dan, kalau mau, saat mengunduh peta sekitar sebelum bencana. Fitur SOS + SMS memakai pulsa SMS biasa dan butuh BTS yang masih hidup.</p>
     </details>
     <details>
       <summary>Kalau Wi‑Fi sedang tersambung ke jaringan rumah atau kantor, apakah tetap bisa?</summary>

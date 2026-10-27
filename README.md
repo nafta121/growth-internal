@@ -23,7 +23,7 @@ Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang pali
 
 Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan perusahaan menjadi dasar model bisnisnya (lihat [Model keberlanjutan](#model-keberlanjutan)).
 
-> **Status:** MVP v0.9.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
+> **Status:** MVP v0.10.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
 
 ## Tampilan
 
@@ -47,11 +47,11 @@ Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan
 | --- | --- | --- |
 | <img src="docs/screenshots/11-menu-profil.png" width="240"> | <img src="docs/screenshots/12-kontak-darurat-sms.png" width="240"> | <img src="docs/screenshots/14-kirim-foto.png" width="240"> |
 
-| Kirim video | | |
+| Kirim video | Peta offline | Jadi jembatan (multihop) |
 | --- | --- | --- |
-| <img src="docs/screenshots/15-kirim-video.png" width="240"> | | |
+| <img src="docs/screenshots/15-kirim-video.png" width="240"> | <img src="docs/screenshots/16-peta-offline.png" width="240"> | <img src="docs/screenshots/17-jadi-jembatan.png" width="240"> |
 
-Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#pengujian)). Nama dan pesan di dalamnya hanya contoh.
+Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#pengujian)). Nama dan pesan di dalamnya hanya contoh. Peta di screenshot digambar oleh tes karena tes berjalan tanpa internet; di HP yang tampil adalah peta OpenStreetMap asli.
 
 ## Fitur
 
@@ -67,6 +67,7 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 - **SOS**: semua HP membunyikan alarm keras dan bergetar. Muncul juga kartu merah berisi jarak dan arah ke pengirim, misalnya "259 m ke arah barat laut". SOS tetap aktif sampai pengirim membatalkannya, dan anggota yang baru bergabung tetap melihatnya.
 - **SOS + SMS**: cadangan saat BTS masih hidup tapi tidak ada kuota internet. Aplikasi menyiapkan SMS berisi link lokasi Google Maps dan baterai ke maksimal 3 kontak darurat (atur di menu profil), lalu Anda tinggal menekan kirim. Tidak butuh izin SMS.
 - **Status diri**: Aman / Butuh bantuan / Terluka. Status ini tampil di bawah foto tiap anggota bersama **level baterai**.
+- **Peta offline**: unduh peta jalan OpenStreetMap radius ±3 km di sekitar posisimu selagi masih ada internet (sekitar 200 petak, beberapa MB). Setelah tersimpan, peta bisa dibuka tanpa internet dan menampilkan posisimu serta setiap anggota dengan warna status (merah = SOS). Bisa digeser, dicubit untuk zoom, dan diketuk dua kali. Ukuran unduhan sengaja dibatasi sesuai aturan pemakaian OpenStreetMap.
 - **Kompas**: radar yang menunjukkan posisi tiap anggota sesuai arah aslinya dan ikut berputar saat HP diputar. GPS bekerja tanpa internet.
 - **Jembatan / multihop (percobaan)**: anggota grup bisa memilih **Jadi jembatan** di menu profil. HP itu membuat grup baru untuk HP yang lebih jauh sambil tetap tersambung ke grup awal lewat Wi‑Fi, sehingga A ↔ jembatan ↔ C saling terhubung dan jangkauan bertambah sekitar satu jarak Wi‑Fi Direct per jembatan. Jembatan bisa disambung berantai. Belum semua HP mendukung Wi‑Fi Direct dan Wi‑Fi biasa sekaligus, jadi fitur ini perlu diuji di lapangan.
 - **Peringatan anggota terputus**: kalau ada HP yang keluar jangkauan atau mati, semua anggota tahu dalam sekitar 10 detik lewat getar, bunyi, dan banner.
@@ -98,7 +99,7 @@ Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk a
 - **Kodenya terbuka.** Semua kode ada di repositori ini dan bisa diperiksa siapa pun. Aplikasinya kecil (sekitar 200 KB) dan tidak memakai library pihak ketiga, jadi tidak ada kode tersembunyi dari SDK iklan atau analitik.
 - **APK dibangun oleh GitHub, bukan di laptop pribadi.** File di halaman [Releases](https://github.com/chalidade/saling-jaga/releases) dibuat otomatis oleh GitHub Actions dari kode publik. Setiap rilis mencantumkan commit asal dan link ke log build-nya.
 - **Cek keaslian file.** Setiap rilis mencantumkan SHA-256 APK dan sidik jari sertifikat penandatangan. File yang diunduh dari sumber lain (grup WhatsApp, Bluetooth) bisa dicocokkan dengan angka ini. File juga bisa dipindai gratis di [VirusTotal](https://www.virustotal.com).
-- **Tidak mengirim data ke internet.** Tidak ada server, akun, iklan, atau pelacak. Data hanya dikirim langsung ke HP anggota grup lewat Wi‑Fi Direct.
+- **Tidak mengirim data ke internet.** Tidak ada server, akun, iklan, atau pelacak. Data hanya dikirim langsung ke HP anggota grup lewat Wi‑Fi Direct. Satu-satunya akses internet adalah saat kamu sendiri menekan **Unduh peta sekitar**: aplikasi mengambil gambar peta dari `tile.openstreetmap.org`, dan tidak ada data pribadi yang ikut terkirim.
 - **Izin seperlunya:**
 
   | Izin | Untuk apa |
@@ -106,7 +107,7 @@ Android memperingatkan setiap APK yang tidak berasal dari Play Store, termasuk a
   | Lokasi / Perangkat sekitar | Wajib dari Android untuk mencari HP lewat Wi‑Fi Direct, dan untuk kompas serta jarak SOS |
   | Mikrofon | Walkie-talkie dan mode telepon, hanya saat tombol ditahan atau telepon aktif |
   | Notifikasi | SOS dan pesan saat layar mati |
-  | Internet / jaringan | Membuka koneksi TCP ke HP lain di grup. Tidak dipakai untuk menghubungi server mana pun |
+  | Internet / jaringan | Membuka koneksi TCP ke HP lain di grup, dan mengunduh gambar peta OpenStreetMap saat kamu menekan Unduh peta. Tidak ada server lain |
   | Getar, wake lock, layanan latar | Alarm SOS dan tetap tersambung saat layar mati |
 
   Saling Jaga **tidak** meminta akses kontak, SMS, file/galeri penuh, kamera, atau log panggilan. Foto dan video dipilih lewat pemilih bawaan Android atau direkam lewat aplikasi kamera HP, dan SOS + SMS memakai aplikasi SMS Anda sendiri.
@@ -167,7 +168,7 @@ Belum ada (direncanakan):
 2. Identitas terverifikasi dan enkripsi.
 3. Multihop: uji lapangan mode jembatan, lalu jembatan otomatis tanpa perlu dipilih manual.
 4. Integrasi LoRa (perangkat Meshtastic lewat Bluetooth) untuk jangkauan 2–10 km.
-5. Peta offline, absen/hitung kepala, senter strobo SOS, kartu medis, mode hemat baterai, dan panduan P3K.
+5. Absen/hitung kepala, senter strobo SOS, kartu medis, mode hemat baterai, dan panduan P3K.
 6. Dasbor posko berbasis web di laptop yang membaca alat LoRa lewat USB/Bluetooth.
 7. Rilis di Google Play dengan verifikasi developer Android.
 
@@ -190,6 +191,7 @@ cd tools/screenshot-tests && gradle test
 ```
 
 - `ClipsTest` menguji pemotongan dan penyusunan ulang klip video, termasuk potongan rusak, duplikat, dan batas memori.
+- `TilesTest` menguji proyeksi peta (cocok dengan petak OSM), batas unduhan sesuai aturan OSM, dan penghitungan petak tersimpan.
 - `EmergencySmsTest` menguji pembersihan nomor kontak darurat dan isi SMS SOS.
 - `HubTest` menjalankan tiga hub di atas socket sungguhan. Yang diuji: relay pesan, teks, dan suara; pengiriman ulang SOS ke anggota baru; penolakan penyamaran; batas ukuran pesan; penolakan nama ganda; dan deteksi anggota keluar. Tes jembatan menggabungkan dua grup lewat satu HP jembatan, lalu memeriksa chat, suara, dan status antar-lompatan, penolakan penyamaran di balik jembatan, serta anggota yang keluar di kedua sisi.
 - `ScreenshotTest` merender layar aplikasi dengan Robolectric (native graphics) ke `tools/screenshot-tests/out/`. Gambar di README berasal dari tes ini.
@@ -214,6 +216,8 @@ app/src/main/
     RadarView.java         radar kompas
     Avatars.java           foto profil bulat / inisial
     Photos.java            kompres & decode foto yang dikirim di grup
+    Tiles.java             peta offline: hitung, unduh, dan simpan petak OpenStreetMap
+    MapView.java           peta yang bisa digeser/zoom dengan titik anggota
     Bridge.java            multihop: sambungan Wi‑Fi ke grup lain lewat IPv6 link-local
     Clips.java             potong & susun ulang klip video yang dikirim di grup
     CaptureProvider.java   file tujuan foto/video kamera (tanpa izin kamera)
