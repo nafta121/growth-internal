@@ -14,6 +14,8 @@ final class Frame {
     static final byte REJECT = 10;
     static final byte IMAGE = 11;
     static final byte VIDEO_CHUNK = 12;
+    static final byte BRIDGE = 13;     // "I relay for phones behind me", sent once by a bridge
+    static final byte JOIN_INFO = 14;  // owner -> direct member: how to reach this group as a bridge
 
     /** Largest payload accepted per type, so a bad peer cannot exhaust memory. */
     static int maxPayload(byte type) {
@@ -26,6 +28,7 @@ final class Frame {
             case PRESENCE: return 256;
             case IMAGE: return Photos.MAX_BYTES; // one compressed JPEG
             case VIDEO_CHUNK: return Clips.HEADER + Clips.CHUNK;
+            case JOIN_INFO: return 512;
             default: return 0;
         }
     }

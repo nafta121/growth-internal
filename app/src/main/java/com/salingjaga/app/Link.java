@@ -35,6 +35,11 @@ final class Link {
     private Thread writer;
     volatile String peerName;
     volatile byte[] peerPhoto;
+    // Members reachable through this link: just the peer, or everyone behind a bridge.
+    final java.util.Set<String> behind = java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    // True for a link to or from a bridge, which carries frames of many senders.
+    volatile boolean relay;
 
     Link(Socket socket, Listener listener) throws IOException {
         this.socket = socket;

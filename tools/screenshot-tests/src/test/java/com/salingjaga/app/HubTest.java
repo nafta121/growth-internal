@@ -28,6 +28,8 @@ public class HubTest {
         public void onAnnouncement(String f, String t) { log.add("announce:" + f + ":" + t); }
         public void onRejected(String r) { log.add("rejected"); }
         public void onImage(String f, byte[] j) { log.add("image:" + f + ":" + j.length); }
+        public void onJoinInfo(byte[] i) { log.add("joininfo:" + new String(i)); }
+        public void onUplink(boolean c) { log.add("uplink:" + c); }
         public void onVideoIncoming(String f) { log.add("video-incoming:" + f); }
         public void onVideo(String f, byte[] v) { log.add("video:" + f + ":" + v.length + ":" + v[v.length - 1]); }
     }
@@ -99,5 +101,75 @@ public class HubTest {
         a.stop();
         waitFor(rb, "left:Budi");
         b.stop(); dup.stop(); owner.stop();
+    }
+
+    /** Two groups merged by a bridge: A's group, and B's group that C joined further away. */
+    @Test public void bridgeJoinsTwoGroups() throws Exception {
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        Rec ra = new Rec(), rx = new Rec(), rb = new Rec(), rc = new Rec();
+        Hub a = new Hub("Pos A", null, ra).port(9101);
+        a.startServer(lo);
+        Thread.sleep(300);
+        a.setJoinInfo(Bridge.encode("DIRECT-ab-Pos A", "rahasia123", "fe80::1"));
+        Hub x = new Hub("Xena", null, rx).port(9101);
+        x.startClient(lo);
+        waitFor(rx, "join:Pos A");
+        waitFor(rx, "joininfo:DIRECT-ab-Pos A\nrahasia123\nfe80::1");   // direct members learn how to bridge
+
+        Hub b = new Hub("Jembatan", null, rb).port(9102);
+        b.startServer(lo);
+        Thread.sleep(300);
+        Hub c = new Hub("Cici", null, rc).port(9102);
+        c.startClient(lo);
+        waitFor(rb, "join:Cici");
+        Presence help = new Presence();
+        help.status = Presence.NEED_HELP;
+        c.sendPresence(help.encode());
+        waitFor(rb, "presence:Cici:2");
+
+        b.startUplink(lo, 9101, javax.net.SocketFactory.getDefault());
+        waitFor(rb, "uplink:true");
+        waitFor(rc, "join:Pos A");          // two hops: A -> bridge -> C
+        waitFor(rc, "join:Xena");
+        waitFor(rx, "join:Jembatan");
+        waitFor(rx, "join:Cici");           // C introduced through the bridge
+        waitFor(rx, "presence:Cici:2");     // ...with her status
+
+        c.sendText("tolong");
+        waitFor(rx, "text:Cici:tolong");
+        x.sendText("otw");
+        waitFor(rc, "text:Xena:otw");
+        x.sendAudio(new byte[640]);
+        waitFor(rc, "audio:Xena:640");
+        assertFalse(rc.log.toString().contains("joininfo"));   // join info never crosses a bridge
+
+        // A plain member cannot speak for someone behind the bridge.
+        Socket s = new Socket(lo, 9101);
+        DataOutputStream out = new DataOutputStream(s.getOutputStream());
+        out.writeByte(Frame.HELLO); out.writeUTF("Eve"); out.writeInt(0);
+        out.writeByte(Frame.BRIDGE); out.writeUTF("Mallory"); out.writeInt(0);
+        out.writeByte(Frame.TEXT); out.writeUTF("Cici"); byte[] fake = "aman".getBytes("UTF-8");
+        out.writeInt(fake.length); out.write(fake); out.flush();
+        waitFor(rx, "join:Eve");
+        Thread.sleep(500);
+        assertFalse(rx.log.contains("text:Cici:aman"));
+        s.close();
+
+        // C walks away: everyone upstream notices.
+        c.stop();
+        waitFor(rx, "left:Cici");
+        // The bridge leaves: A's side loses the bridge, and the bridge's side loses A's.
+        rx.log.clear();
+        Rec rc2 = new Rec();
+        Hub c2 = new Hub("Cici", null, rc2).port(9102);
+        c2.startClient(lo);
+        waitFor(rx, "join:Cici");
+        waitFor(rc2, "join:Xena");
+        b.stop();
+        waitFor(rx, "left:Jembatan");
+        waitFor(rx, "left:Cici");
+        waitFor(rc2, "left:Pos A");
+        waitFor(rc2, "left:Xena");
+        a.stop(); x.stop(); c2.stop();
     }
 }

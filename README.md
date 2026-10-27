@@ -23,7 +23,7 @@ Saat bencana datang, BTS sering mati dan internet hilang tepat ketika orang pali
 
 Gratis untuk warga. Kebutuhan tim dan institusi seperti posko, SAR, sekolah, dan perusahaan menjadi dasar model bisnisnya (lihat [Model keberlanjutan](#model-keberlanjutan)).
 
-> **Status:** MVP v0.8.1. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
+> **Status:** MVP v0.9.0. Semua fitur sudah ter-build dan protokolnya teruji otomatis, tapi belum diuji lapangan di HP asli. Masukan dari uji coba sangat dibutuhkan.
 
 ## Tampilan
 
@@ -68,6 +68,7 @@ Screenshot dirender otomatis dari kode, bukan mockup (lihat [Pengujian](#penguji
 - **SOS + SMS**: cadangan saat BTS masih hidup tapi tidak ada kuota internet. Aplikasi menyiapkan SMS berisi link lokasi Google Maps dan baterai ke maksimal 3 kontak darurat (atur di menu profil), lalu Anda tinggal menekan kirim. Tidak butuh izin SMS.
 - **Status diri**: Aman / Butuh bantuan / Terluka. Status ini tampil di bawah foto tiap anggota bersama **level baterai**.
 - **Kompas**: radar yang menunjukkan posisi tiap anggota sesuai arah aslinya dan ikut berputar saat HP diputar. GPS bekerja tanpa internet.
+- **Jembatan / multihop (percobaan)**: anggota grup bisa memilih **Jadi jembatan** di menu profil. HP itu membuat grup baru untuk HP yang lebih jauh sambil tetap tersambung ke grup awal lewat Wi‑Fi, sehingga A ↔ jembatan ↔ C saling terhubung dan jangkauan bertambah sekitar satu jarak Wi‑Fi Direct per jembatan. Jembatan bisa disambung berantai. Belum semua HP mendukung Wi‑Fi Direct dan Wi‑Fi biasa sekaligus, jadi fitur ini perlu diuji di lapangan.
 - **Peringatan anggota terputus**: kalau ada HP yang keluar jangkauan atau mati, semua anggota tahu dalam sekitar 10 detik lewat getar, bunyi, dan banner.
 
 **Kenyamanan**
@@ -134,7 +135,7 @@ Jangkauan Wi‑Fi Direct biasanya 50–100 m di area terbuka dan lebih pendek di
 ```
 
 - **Penemuan dan koneksi**: memakai `WifiP2pManager` bawaan Android, tanpa library pihak ketiga.
-- **Protokol**: frame biner sederhana di atas TCP, berisi `tipe · pengirim · panjang · isi`. Tipenya `HELLO` (nama + foto), `TEXT`, `IMAGE` (JPEG), `VIDEO_CHUNK` (potongan klip 32 KB), `AUDIO` (PCM 16 kHz mono, potongan 20 ms), `TALK_START/END`, `PRESENCE` (status, baterai, lokasi), `ANNOUNCE`, `LEAVE`, `PING`, dan `REJECT`.
+- **Protokol**: frame biner sederhana di atas TCP, berisi `tipe · pengirim · panjang · isi`. Tipenya `HELLO` (nama + foto), `TEXT`, `IMAGE` (JPEG), `BRIDGE` dan `JOIN_INFO` (multihop), `VIDEO_CHUNK` (potongan klip 32 KB), `AUDIO` (PCM 16 kHz mono, potongan 20 ms), `TALK_START/END`, `PRESENCE` (status, baterai, lokasi), `ANNOUNCE`, `LEAVE`, `PING`, dan `REJECT`.
 - **Relay**: pemilik grup meneruskan setiap frame ke anggota lain. Ia juga mengirim ulang daftar anggota dan status terakhir, termasuk SOS yang masih aktif, ke HP yang baru bergabung.
 - **Deteksi putus**: setiap koneksi mengirim `PING` tiap 3 detik. Koneksi yang diam lebih dari 10 detik dianggap putus.
 - **Latar belakang**: foreground service menahan CPU dan Wi‑Fi tetap aktif selama berada di grup.
@@ -145,6 +146,8 @@ Yang sudah diterapkan:
 - Server hanya mendengarkan di alamat grup Wi‑Fi Direct, sehingga perangkat di Wi‑Fi kafe atau hotspot yang sama tidak bisa masuk.
 - Lalu lintas di udara terenkripsi WPA2 milik Wi‑Fi Direct, dan anggota harus disetujui lewat undangan.
 - Pemilik grup menolak frame yang mengaku dari anggota lain, sehingga tidak ada SOS atau pengumuman palsu atas nama orang lain. Nama ganda dalam satu grup juga ditolak.
+- Lewat jembatan, setiap pengirim terikat ke sambungan tempat ia pertama muncul. HP biasa hanya boleh bicara atas nama dirinya sendiri, dan jembatan hanya atas nama HP di belakangnya. Nama yang sudah ada tidak bisa diambil alih.
+- Catatan multihop: pemilik grup membagikan nama dan kata sandi Wi‑Fi grupnya ke anggota langsung, supaya anggota bisa menjadi jembatan. Artinya anggota yang sudah diterima bisa menyambungkan perangkat lain tanpa persetujuan ulang, dan HP mana pun bisa mengaku sebagai jembatan lalu memperkenalkan nama baru (tapi tidak bisa memakai nama yang sudah ada). Identitas terverifikasi di bawah akan menutup celah ini.
 - Ukuran setiap jenis pesan, dimensi foto, dan jumlah klip video yang sedang disusun dibatasi, sehingga satu HP tidak bisa membuat HP lain crash.
 
 Belum ada (direncanakan):
@@ -155,14 +158,14 @@ Belum ada (direncanakan):
 
 - Jika aplikasi ditutup paksa (diusap dari daftar aplikasi terbaru), koneksi grup ikut berhenti.
 - Suara dikirim mentah sekitar 256 kbps. Cukup untuk Wi‑Fi Direct, tapi belum hemat baterai.
-- Kebanyakan HP hanya bisa ikut satu grup Wi‑Fi Direct dalam satu waktu, sehingga belum ada multihop.
+- Satu HP hanya bisa ikut satu grup Wi‑Fi Direct, jadi multihop memakai HP jembatan yang memiliki grupnya sendiri dan ikut grup lain sebagai Wi‑Fi biasa. Cara ini belum teruji di banyak merek HP. Setiap lompatan juga menambah sedikit jeda suara.
 - Riwayat chat belum disimpan, dan belum ada sambung ulang otomatis.
 
 ## Peta jalan
 
 1. Uji lapangan di 2–5 HP dari berbagai merek.
 2. Identitas terverifikasi dan enkripsi.
-3. Multihop untuk pesan, SOS, lokasi, dan voice note.
+3. Multihop: uji lapangan mode jembatan, lalu jembatan otomatis tanpa perlu dipilih manual.
 4. Integrasi LoRa (perangkat Meshtastic lewat Bluetooth) untuk jangkauan 2–10 km.
 5. Peta offline, absen/hitung kepala, senter strobo SOS, kartu medis, mode hemat baterai, dan panduan P3K.
 6. Dasbor posko berbasis web di laptop yang membaca alat LoRa lewat USB/Bluetooth.
@@ -188,7 +191,7 @@ cd tools/screenshot-tests && gradle test
 
 - `ClipsTest` menguji pemotongan dan penyusunan ulang klip video, termasuk potongan rusak, duplikat, dan batas memori.
 - `EmergencySmsTest` menguji pembersihan nomor kontak darurat dan isi SMS SOS.
-- `HubTest` menjalankan tiga hub di atas socket sungguhan. Yang diuji: relay pesan, teks, dan suara; pengiriman ulang SOS ke anggota baru; penolakan penyamaran; batas ukuran pesan; penolakan nama ganda; dan deteksi anggota keluar.
+- `HubTest` menjalankan tiga hub di atas socket sungguhan. Yang diuji: relay pesan, teks, dan suara; pengiriman ulang SOS ke anggota baru; penolakan penyamaran; batas ukuran pesan; penolakan nama ganda; dan deteksi anggota keluar. Tes jembatan menggabungkan dua grup lewat satu HP jembatan, lalu memeriksa chat, suara, dan status antar-lompatan, penolakan penyamaran di balik jembatan, serta anggota yang keluar di kedua sisi.
 - `ScreenshotTest` merender layar aplikasi dengan Robolectric (native graphics) ke `tools/screenshot-tests/out/`. Gambar di README berasal dari tes ini.
 
 GitHub Actions:
@@ -211,6 +214,7 @@ app/src/main/
     RadarView.java         radar kompas
     Avatars.java           foto profil bulat / inisial
     Photos.java            kompres & decode foto yang dikirim di grup
+    Bridge.java            multihop: sambungan Wi‑Fi ke grup lain lewat IPv6 link-local
     Clips.java             potong & susun ulang klip video yang dikirim di grup
     CaptureProvider.java   file tujuan foto/video kamera (tanpa izin kamera)
     Alerts.java            notifikasi sistem
