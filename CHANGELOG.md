@@ -2,6 +2,36 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.19.0] - 2026-10-28
+
+### Diperbaiki & Dioptimalkan (Remediasi 14 Temuan Audit `android-skills` + `/ponytail-audit`)
+- **Sinkronisasi Antrean GATT BLE & Pencegahan Kehilangan Paket (`MeshAccess`)**:
+  - Menambahkan *per-connection binary* `Semaphore` (`writeGate` & `serverGates`) yang disinkronkan dengan `onCharacteristicWrite()` dan `onNotificationSent()` sehingga pengiriman pecahan paket (*split packets*) dan suara ADPCM di atas GATT `0xFE12` tidak pernah menimpa *buffer* radio atau dibuang diam-diam oleh stack Bluetooth Android.
+- **Konvergensi `ClusterId` Seketika & Propagasi Ukuran Klaster Multi-Hop (`Hub`, `MainActivity`, `MeshCoordinator`)**:
+  - Menambahkan `Hub.onClusterChanged(Runnable)` dan pembaruan iklan instan di `onMemberJoined`/`onMemberLeft` agar perubahan `clusterId` dan `clusterSize` langsung disiarkan ke BLE (`0xFD91`), Wi‑Fi Aware, dan LAN tanpa menunggu siklus 30 detik.
+  - Mempropaganda pertumbuhan `reportedClusterSize` melalui bingkai `Frame.CLUSTER_UPDATE` sehingga klaster 3+ node yang sedang tumbuh selalu menang secara deterministik ketika bertemu klaster 2 node.
+- **Penutupan Kebocoran Sumber Daya & Siklus Hidup `relayHub` (`Bt`, `MeshAccess`, `MeshCoordinator`, `MainActivity`)**:
+  - Menutup `MeshAccess.Pipe` secara eksplisit saat `openTunnel()` mengalami *timeout* 5 detik atau kegagalan `hub.addStreamLink()`, serta menghentikan `relayHub` secara otomatis ketika pengguna beralih ke grup aktif (`initHub` / `stopHub`).
+- **Isolasi Dekode Foto dari Thread Audio, Caching `Cipher` AES-128, & Keamanan `AudioRecord` (`MainActivity`, `MeshAccess`, `Voice`)**:
+  - Memindahkan `Photos.decode(jpeg, 720)` di `MainActivity.onImage()` ke thread latar `"image-decode"` agar thread `link-reader` tidak pernah menahan paket suara Walkie-Talkie *real-time*.
+  - Menyimpan instans `Cipher` AES-128 (`encCipher` & `decCipher`) per sesi `MeshAccess.Session` untuk mengeliminasi *overhead* pencarian JCA provider pada setiap blok 16-byte.
+  - Menambahkan `AtomicBoolean activeCapture` per sesi dan `join(250)` di `Voice.stopCapture()` untuk mencegah *race condition* mikrofon saat tombol PTT ditekan cepat berulang kali.
+- **Anti-Tabrakan Broadcast BLE Flood Mesh & Pembatasan Path `CaptureProvider` (`Ble`, `AndroidManifest.xml`)**:
+  - Menambahkan *random back-off jitter* `30–180 ms` sebelum meneruskan paket BLE Mesh (`0xFD92`) guna mencegah tabrakan sinyal di kanal iklan BLE 37/38/39.
+  - Mengubah `CaptureProvider` ke `android:grantUriPermissions="false"` dengan elemen `<grant-uri-permission>` eksplisit hanya untuk `/photo.jpg`, `/video.mp4`, dan `/growth-internal.apk`.
+- **Modularisasi `MeshCoordinator` & Pembersihan Overload Legacy (`MeshCoordinator`, `MainActivity`, `Ble`, `Lan`, `Aware`, `AdpcmTest`)**:
+  - Mengekstrak logika koordinasi *auto-connect*, *cooldown*, deduplikasi, dan `relayHub` ke kelas `MeshCoordinator.java`, menghapus *overload* lama yang tidak terpakai, serta menambahkan pengujian unit `dynamicClusterSizePropagationAndCoordinatorLifecycle`.
+
+## [0.18.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Adopsi BlueRange MeshAccessModule & Zero-Action Passive Relay)
+- **BlueRange `MeshAccessModule` (`MeshAccess.java`, GATT Service `0xFE12`)**:
+  - Menambahkan layanan dan klien GATT `0xFE12` tanpa *pairing* OS (`SET_OPEN` / `PERMISSION_WRITE`), dilengkapi **4-Way Handshake AES-128** (`ANonce`/`SNonce`, kunci sesi turunan, `FM_KEY_NETWORK` & `FM_KEY_ZERO`), proteksi integritas **4-byte MIC**, pemulihan *nonce* otomatis **`DEAD_DATA`** (`0xDEADDADA00FF7733`), serta pemecahan & penyusunan ulang paket (`SPLIT_WRITE_CMD` / `SPLIT_WRITE_CMD_END`).
+- **Anti-Loop & Resolusi Split-Brain Berbasis `ClusterId` (`Hub`, `Frame.CLUSTER_UPDATE`, `Ble`, `Lan`, `Aware`)**:
+  - Menyematkan `ClusterId` 32-bit dinamis dan `lossCounter` di `Hub` serta menyiarkannya pada beacon BLE, Wi‑Fi Aware, dan LAN untuk mencegah koneksi ganda melingkar (*anti-loop*) dan menyatukan dua klaster yang bertemu secara otomatis.
+- **Zero-Action Passive Relay (`MainActivity.ensureRelayHub`, `Bt`)**:
+  - Memungkinkan perangkat **Growth Internal** dalam kondisi *standby* menjadi jembatan penyambung multi-hop terenkripsi di latar belakang tanpa tindakan apa pun di layar perangkat perantara.
+
 ## [0.17.0] - 2026-10-28
 
 ### Diperbaiki & Dioptimalkan (Audit Menyeluruh `android-skills` + `/ponytail-audit` & Keystore Persisten)

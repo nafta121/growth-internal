@@ -521,6 +521,80 @@ public class AdpcmTest {
         hubA.stop();
     }
 
+    @Test public void dynamicClusterSizePropagationAndCoordinatorLifecycle() throws Exception {
+        final java.util.concurrent.atomic.AtomicInteger clusterChanges =
+                new java.util.concurrent.atomic.AtomicInteger();
+        Runnable onChanged = new Runnable() {
+            @Override public void run() { clusterChanges.incrementAndGet(); }
+        };
+
+        // 1. MeshCoordinator passive relay hub lifecycle
+        MeshCoordinator coord = new MeshCoordinator();
+        assertEquals(0, coord.activeClusterId(null));
+        Hub relay = coord.ensureRelayHub("Standby", onChanged);
+        assertNotNull(relay);
+        assertTrue(coord.activeClusterId(null) != 0);
+        coord.stopRelayHub();
+        assertEquals(0, coord.activeClusterId(null));
+
+        // 2. Dynamic 3-node cluster (A-B-C) vs 2-node cluster (D-E) collision resolution
+        HubTest.Rec rA = new HubTest.Rec();
+        HubTest.Rec rB = new HubTest.Rec();
+        HubTest.Rec rC = new HubTest.Rec();
+        HubTest.Rec rD = new HubTest.Rec();
+        HubTest.Rec rE = new HubTest.Rec();
+
+        Hub hubA = new Hub("Node A", null, rA).asOwner(true).onClusterChanged(onChanged);
+        Hub hubB = new Hub("Node B", null, rB).asOwner(true).onClusterChanged(onChanged);
+        Hub hubC = new Hub("Node C", null, rC).asOwner(true).onClusterChanged(onChanged);
+
+        MeshAccess.Pipe[] ab = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubA.addStreamLink(ab[0].in, ab[0].out, ab[0], true);
+        hubB.addStreamLink(ab[1].in, ab[1].out, ab[1], true);
+        HubTest.waitFor(rA, "join:Node B");
+
+        MeshAccess.Pipe[] bc = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubB.addStreamLink(bc[0].in, bc[0].out, bc[0], true);
+        hubC.addStreamLink(bc[1].in, bc[1].out, bc[1], true);
+        HubTest.waitFor(rA, "join:Node C");
+        HubTest.waitFor(rC, "join:Node A");
+
+        for (int i = 0; i < 20 && (hubA.clusterId() != hubC.clusterId() || hubC.clusterSize() < 3); i++) {
+            Thread.sleep(50);
+        }
+        int winnerCid = hubA.clusterId();
+        assertEquals(winnerCid, hubC.clusterId());
+        assertEquals("3-node cluster size must propagate acrossCLUSTER_UPDATE", 3, hubC.clusterSize());
+
+        // Form separate 2-node cluster (D-E)
+        Hub hubD = new Hub("Node D", null, rD).asOwner(true).onClusterChanged(onChanged);
+        Hub hubE = new Hub("Node E", null, rE).asOwner(true).onClusterChanged(onChanged);
+        MeshAccess.Pipe[] de = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubD.addStreamLink(de[0].in, de[0].out, de[0], true);
+        hubE.addStreamLink(de[1].in, de[1].out, de[1], true);
+        HubTest.waitFor(rD, "join:Node E");
+
+        // Link 3-node cluster (C) with 2-node cluster (D): larger 3-node cluster must always win!
+        MeshAccess.Pipe[] cd = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubC.addStreamLink(cd[0].in, cd[0].out, cd[0], true);
+        hubD.addStreamLink(cd[1].in, cd[1].out, cd[1], true);
+        HubTest.waitFor(rA, "join:Node E");
+        HubTest.waitFor(rE, "join:Node A");
+
+        for (int i = 0; i < 30 && (hubE.clusterId() != winnerCid); i++) {
+            Thread.sleep(50);
+        }
+        assertEquals("Larger 3-node cluster must win over 2-node cluster", winnerCid, hubD.clusterId());
+        assertEquals("All 5 nodes must converge to 3-node cluster's ClusterId", winnerCid, hubE.clusterId());
+        assertTrue("onClusterChanged callback must have fired", clusterChanges.get() > 0);
+
+        hubE.stop();
+        hubD.stop();
+        hubC.stop();
+        hubB.stop();
+        hubA.stop();
+    }
+
     private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
         MeshAccess.Session sCentral = new MeshAccess.Session(
                 true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);

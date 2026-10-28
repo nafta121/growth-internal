@@ -171,8 +171,10 @@ final class Ble {
                 if (pkt != null && recordSeenMesh(pkt.msgId)) {
                     if (listener != null) listener.onMesh(pkt);
                     if (pkt.ttl > 1) {
-                        byte[] relayed = packMesh(pkt.msgId, pkt.ttl - 1, pkt.type, pkt.sender, pkt.body);
-                        advertiseMeshRaw(relayed);
+                        final byte[] relayed = packMesh(pkt.msgId, pkt.ttl - 1, pkt.type, pkt.sender, pkt.body);
+                        handler.postDelayed(new Runnable() {
+                            @Override public void run() { advertiseMeshRaw(relayed); }
+                        }, 30 + random.nextInt(150));
                     }
                 }
             }
@@ -232,14 +234,6 @@ final class Ble {
         } catch (RuntimeException ignored) {
             scanning = false;
         }
-    }
-
-    void updateAdvertise(String name, Presence p, boolean inGroup) {
-        updateAdvertise(name, p, inGroup, lastAdvPsm, lastAdvClusterId);
-    }
-
-    void updateAdvertise(String name, Presence p, boolean inGroup, int psm) {
-        updateAdvertise(name, p, inGroup, psm, lastAdvClusterId);
     }
 
     void updateAdvertise(String name, Presence p, boolean inGroup, int psm, int clusterId) {

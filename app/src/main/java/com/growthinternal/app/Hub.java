@@ -83,12 +83,19 @@ final class Hub implements Link.Listener {
     private int port = PORT;
     private volatile int clusterId;
     private volatile int lossCounter;
+    private volatile int reportedClusterSize;
+    private volatile Runnable clusterListener;
 
     Hub(String myName, byte[] myPhoto, Callback cb) {
         this.myName = myName;
         this.myPhoto = myPhoto;
         this.cb = cb != null ? cb : NOOP_CALLBACK;
         this.clusterId = computeClusterId(myName, 0);
+    }
+
+    Hub onClusterChanged(Runnable listener) {
+        this.clusterListener = listener;
+        return this;
     }
 
     static int computeClusterId(String name, int lossCount) {
@@ -102,7 +109,7 @@ final class Hub implements Link.Listener {
     int lossCounter() { return lossCounter; }
 
     int clusterSize() {
-        synchronized (members) { return members.size() + 1; }
+        synchronized (members) { return Math.max(members.size() + 1, reportedClusterSize); }
     }
 
     static byte[] encodeClusterUpdate(int clusterId, int clusterSize) {
@@ -403,15 +410,25 @@ final class Hub implements Link.Listener {
             if (f.payload != null && f.payload.length >= 4) {
                 int peerCid = ((f.payload[0] & 0xFF) << 8) | (f.payload[1] & 0xFF);
                 int peerSize = ((f.payload[2] & 0xFF) << 8) | (f.payload[3] & 0xFF);
-                if (peerCid != 0 && peerCid != clusterId) {
-                    int mySize = clusterSize();
-                    boolean adoptPeer = peerSize > mySize
-                            || (peerSize == mySize && peerCid < clusterId);
-                    if (adoptPeer) {
-                        clusterId = peerCid;
-                        broadcast(buildClusterFrame(), from);
+                if (peerCid != 0) {
+                    if (peerCid == clusterId) {
+                        if (peerSize > clusterSize()) {
+                            reportedClusterSize = peerSize;
+                            broadcast(buildClusterFrame(), from);
+                        }
                     } else {
-                        from.send(buildClusterFrame());
+                        int mySize = clusterSize();
+                        boolean adoptPeer = peerSize > mySize
+                                || (peerSize == mySize && peerCid < clusterId);
+                        if (adoptPeer) {
+                            clusterId = peerCid;
+                            reportedClusterSize = peerSize;
+                            broadcast(buildClusterFrame(), from);
+                            Runnable cl = clusterListener;
+                            if (cl != null) cl.run();
+                        } else {
+                            from.send(buildClusterFrame());
+                        }
                     }
                 }
             }
@@ -489,9 +506,14 @@ final class Hub implements Link.Listener {
         if (wasUplink) uplink = null;
         if (stopped) return;
         lossCounter++;
+        reportedClusterSize = 0;
         if (wasUplink) cb.onUplink(false);
         if (link.peerName == null) {
-            if (links.isEmpty()) clusterId = computeClusterId(myName, lossCounter);
+            if (links.isEmpty()) {
+                clusterId = computeClusterId(myName, lossCounter);
+                Runnable cl = clusterListener;
+                if (cl != null) cl.run();
+            }
             if (!owner && links.isEmpty()) cb.onRejected("Koneksi ke pemilik grup terputus");
             return;
         }
@@ -503,6 +525,8 @@ final class Hub implements Link.Listener {
         }
         if (wasUplink || link.relay || links.isEmpty()) {
             clusterId = computeClusterId(myName, lossCounter);
+            Runnable cl = clusterListener;
+            if (cl != null) cl.run();
         }
         if (!links.isEmpty()) {
             broadcast(buildClusterFrame(), null);

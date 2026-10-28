@@ -109,7 +109,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     private Handler ui;
 
     private Hub hub;
-    private Hub relayHub;
+    private final MeshCoordinator coordinator = new MeshCoordinator();
     // Multihop: how to reach our owner's group (from JOIN_INFO), and the group we bridge to.
     private byte[] upstreamInfo;
     private Bridge.Info bridgeTo;
@@ -136,11 +136,6 @@ public class MainActivity extends Activity implements Hub.Callback {
             new LinkedHashMap<String, android.bluetooth.BluetoothDevice>();
     private final Map<String, String> btNames = new LinkedHashMap<String, String>();
     private final Map<String, Integer> btPsms = new HashMap<String, Integer>();
-    private final Map<String, Long> recentMeshTexts = new LinkedHashMap<String, Long>() {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
-            return size() > 256;
-        }
-    };
     private final Set<String> bleSosNames = new HashSet<String>();
     private final Map<String, Presence> presences = new HashMap<String, Presence>();
     private final Set<String> sosSilenced = new HashSet<String>();
@@ -386,10 +381,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (lan != null) lan.stop();
         if (bt != null) bt.stop();
         if (ble != null) ble.stop();
-        if (relayHub != null) {
-            relayHub.stop();
-            relayHub = null;
-        }
+        coordinator.stopRelayHub();
         stopHub();
         stopBridge();
         if (p2p != null) p2p.removeGroup(channel, null);
@@ -1514,9 +1506,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private int activeClusterId() {
-        if (hub != null) return hub.clusterId();
-        if (relayHub != null) return relayHub.clusterId();
-        return 0;
+        return coordinator.activeClusterId(hub);
     }
 
     private void sendPresence() {
@@ -2257,10 +2247,6 @@ public class MainActivity extends Activity implements Hub.Callback {
                 .show();
     }
 
-    private static final long AUTO_COOLDOWN_MS = 12000L;
-    private final Map<String, Long> autoConnectCooldown = new HashMap<String, Long>();
-    private long autoConnectPauseUntil;
-
     private void saveProfile(String name, byte[] photo) {
         myName = name;
         myPhoto = photo;
@@ -2366,9 +2352,20 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.postDelayed(presenceTick, PRESENCE_EVERY_MS);
     }
 
+    private final Runnable onClusterChangedCallback = new Runnable() {
+        @Override public void run() {
+            ui.post(new Runnable() {
+                @Override public void run() { sendPresence(); }
+            });
+        }
+    };
+
     private Hub initHub(boolean ownerMode) {
         if (hub != null) return hub;
-        hub = new Hub(myName, myPhoto, this).asOwner(ownerMode);
+        coordinator.stopRelayHub();
+        hub = new Hub(myName, myPhoto, this)
+                .asOwner(ownerMode)
+                .onClusterChanged(onClusterChangedCallback);
         isOwner = ownerMode;
         hub.sendPresence(buildPresence().encode());
         ui.removeCallbacks(presenceTick);
@@ -2393,55 +2390,23 @@ public class MainActivity extends Activity implements Hub.Callback {
      */
     private Hub ensureRelayHub() {
         if (hub != null) return hub;
-        if (relayHub == null) {
-            relayHub = new Hub(myName + "#relay", null, Hub.NOOP_CALLBACK).asOwner(true);
-        }
-        return relayHub;
+        return coordinator.ensureRelayHub(myName, onClusterChangedCallback);
     }
 
-    /**
-     * Returns 1 to auto-join peer as client, 2 to auto-start owner hub for peer,
-     * or 0 to do nothing. Resolves split-brain by preferring larger groups,
-     * breaking ties deterministically by name, and preventing loops via BlueRange ClusterId.
-     */
     static int autoConnectDecision(boolean myInGroup, int myMemberCount, String myName,
             boolean peerInGroup, int peerMemberCount, String peerName) {
-        return autoConnectDecision(myInGroup, myMemberCount, myName, 0,
-                peerInGroup, peerMemberCount, peerName, 0);
+        return MeshCoordinator.autoConnectDecision(myInGroup, myMemberCount, myName,
+                peerInGroup, peerMemberCount, peerName);
     }
 
     static int autoConnectDecision(boolean myInGroup, int myMemberCount, String myName, int myClusterId,
             boolean peerInGroup, int peerMemberCount, String peerName, int peerClusterId) {
-        if (myName == null || peerName == null || myName.equals(peerName)) return 0;
-        // BlueRange ClusterId loop prevention: nodes in the same cluster are already connected multi-hop
-        if (myClusterId != 0 && myClusterId == peerClusterId) return 0;
-        if (peerInGroup) {
-            if (!myInGroup) return 1;
-            if (myMemberCount <= 1) {
-                if (peerMemberCount > 1 || myName.compareTo(peerName) > 0) return 1;
-            } else if (myClusterId != 0 && peerClusterId != 0 && myClusterId != peerClusterId) {
-                if (peerMemberCount > myMemberCount
-                        || (peerMemberCount == myMemberCount && myClusterId > peerClusterId)) {
-                    return 1;
-                }
-            }
-            return 0;
-        }
-        if (!myInGroup) {
-            return myName.compareTo(peerName) < 0 ? 2 : 0;
-        }
-        return 0;
+        return MeshCoordinator.autoConnectDecision(myInGroup, myMemberCount, myName, myClusterId,
+                peerInGroup, peerMemberCount, peerName, peerClusterId);
     }
 
     private boolean canAutoConnect(String key, String peerName) {
-        if (key == null || peerName == null || peerName.equals(myName)) return false;
-        if (hub != null && hub.hasMember(peerName)) return false;
-        long now = System.currentTimeMillis();
-        if (now < autoConnectPauseUntil) return false;
-        Long last = autoConnectCooldown.get(key);
-        if (last != null && now - last < AUTO_COOLDOWN_MS) return false;
-        autoConnectCooldown.put(key, now);
-        return true;
+        return coordinator.canAutoConnect(key, peerName, myName, hub);
     }
 
     private void onAwarePeer(Aware.Peer peer) {
@@ -2452,17 +2417,17 @@ public class MainActivity extends Activity implements Hub.Callback {
             setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
         }
         if (hub != null && hub.hasMember(peer.name)) return;
+        int myCid = activeClusterId();
         int action = autoConnectDecision(hub != null && hub.hasPeers(), groupMemberCount(), myName,
-                activeClusterId(), peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
-        if (action == 1 && canAutoConnect("aware:" + peer.name, peer.name)) {
+                myCid, peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
+        boolean initiate = action == 1
+                || (!peer.inGroup && (myCid == 0 || myCid != peer.clusterId)
+                        && myName.compareTo(peer.name) > 0);
+        if (initiate && canAutoConnect("aware:" + peer.name, peer.name)) {
             connectAware(peer);
         } else if (action == 2 && canAutoConnect("aware-own:" + peer.name, peer.name)) {
             ensureActiveHub();
             sendPresence();
-        } else if (!peer.inGroup && (activeClusterId() == 0 || activeClusterId() != peer.clusterId)
-                && myName.compareTo(peer.name) > 0
-                && canAutoConnect("aware:" + peer.name, peer.name)) {
-            connectAware(peer);
         }
     }
 
@@ -2475,7 +2440,7 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void connectAware(Aware.Peer peer) {
         if (peer == null || aware == null || !ensurePermissions()) return;
-        autoConnectPauseUntil = 0;
+        coordinator.clearPause();
         ensureActiveHub();
         setStatus("Menyiapkan jalur Wi‑Fi Aware ke " + peer.name + "…", AMBER);
         aware.connect(peer);
@@ -2496,15 +2461,14 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
         int action = autoConnectDecision(hub != null && hub.hasPeers(), groupMemberCount(), myName,
                 activeClusterId(), peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
-        if (action == 1 && canAutoConnect("lan:" + peer.name, peer.name)) {
-            connectLan(peer);
-        } else if (action == 2 && canAutoConnect("lan-own:" + peer.name, peer.name)) {
+        if ((action == 1 && canAutoConnect("lan:" + peer.name, peer.name))
+                || (action == 2 && canAutoConnect("lan-own:" + peer.name, peer.name))) {
             connectLan(peer);
         }
     }
 
     private void onBtIncoming(final android.bluetooth.BluetoothSocket socket) {
-        final boolean passive = System.currentTimeMillis() < autoConnectPauseUntil;
+        final boolean passive = coordinator.isPaused();
         final Hub h = passive ? ensureRelayHub() : ensureActiveHub();
         if (!passive) sendPresence();
         new Thread(new Runnable() {
@@ -2520,8 +2484,7 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void onMeshAccessTunnel(final MeshAccess.Pipe pipe, final byte tunnelType, final int fmKeyId) {
         if (pipe == null) return;
-        final boolean passive = fmKeyId == MeshAccess.FM_KEY_ZERO
-                || System.currentTimeMillis() < autoConnectPauseUntil;
+        final boolean passive = fmKeyId == MeshAccess.FM_KEY_ZERO || coordinator.isPaused();
         final Hub h = passive ? ensureRelayHub() : ensureActiveHub();
         if (!passive) sendPresence();
         new Thread(new Runnable() {
@@ -2583,17 +2546,12 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private boolean shouldAcceptMeshText(String senderKey, String text) {
-        long now = System.currentTimeMillis();
-        String key = senderKey + ":" + text;
-        Long prev = recentMeshTexts.get(key);
-        recentMeshTexts.put(key, now);
-        return prev == null || now - prev > 10000L;
+        return coordinator.shouldAcceptMeshText(senderKey, text);
     }
 
     private void updateMeshPeerState(String peerName, Presence p, boolean inRange) {
         if (peerName == null || peerName.equals(myName)) return;
-        boolean paused = System.currentTimeMillis() < autoConnectPauseUntil;
-        if (inRange && !paused) {
+        if (inRange && !coordinator.isPaused()) {
             ensureActiveHub();
             boolean isNew = !members.containsKey(peerName);
             if (isNew) {
@@ -2626,7 +2584,7 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void connectLan(Lan.Peer peer) {
         if (peer == null || !ensurePermissions()) return;
-        autoConnectPauseUntil = 0;
+        coordinator.clearPause();
         Hub h = ensureActiveHub();
         if (peer.inGroup || myName.compareTo(peer.name) > 0) {
             setStatus("Menyambung ke " + peer.name + " (Hotspot/Wi‑Fi Lokal)…", AMBER);
@@ -2639,7 +2597,7 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void connectBt(final android.bluetooth.BluetoothDevice device, final int psm, final String name) {
         if (device == null || !ensurePermissions()) return;
-        autoConnectPauseUntil = 0;
+        coordinator.clearPause();
         ensureActiveHub();
         connectBtSilent(device, psm, name);
     }
@@ -2665,8 +2623,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     // ------------------------------------------------------ Wi-Fi Direct
 
     private void discover() {
-        autoConnectPauseUntil = 0;
-        autoConnectCooldown.clear();
+        coordinator.resetCooldowns();
         discover(0);
     }
 
@@ -2741,7 +2698,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void disconnect() {
-        autoConnectPauseUntil = System.currentTimeMillis() + 15000L;
+        coordinator.pauseAfterDisconnect();
         p2pGroupActive = false;
         stopHub();
         stopBridge();
@@ -2964,6 +2921,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (callMode) callMode = false;
         stopProximity();
         stopTalking();
+        coordinator.stopRelayHub();
         if (hub != null) {
             hub.stop();
             hub = null;
@@ -3104,7 +3062,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 refreshSos();
                 setStatus("Terhubung · " + (members.size() + 1) + " orang", ACCENT);
                 if (isNew) addSystemMessage(name + " bergabung");
-                if (isOwner) sendPresence();
+                sendPresence();
                 updateKeepAlive();
             }
         });
@@ -3126,7 +3084,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 alertLost(name + " terputus dari grup");
                 notifyAway(Alerts.CH_MESSAGES, name + " terputus dari grup",
                         "Mungkin keluar jangkauan atau baterai habis.");
-                if (isOwner) sendPresence();
+                sendPresence();
                 updateKeepAlive();
                 if (members.isEmpty()) setStatus("Tidak ada anggota tersambung", DANGER);
                 else setStatus("Terhubung · " + (members.size() + 1) + " orang", ACCENT);
@@ -3135,13 +3093,19 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     @Override public void onImage(final String from, final byte[] jpeg) {
-        final Bitmap thumb = Photos.decode(jpeg, 720);
-        ui.post(new Runnable() {
+        Runnable decode = new Runnable() {
             @Override public void run() {
-                addImageBubble(from, jpeg, thumb, false);
-                notifyAway(Alerts.CH_MESSAGES, from, "Mengirim foto");
+                final Bitmap thumb = Photos.decode(jpeg, 720);
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        addImageBubble(from, jpeg, thumb, false);
+                        notifyAway(Alerts.CH_MESSAGES, from, "Mengirim foto");
+                    }
+                });
             }
-        });
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) decode.run();
+        else new Thread(decode, "image-decode").start();
     }
 
     @Override public void onVoiceNote(final String from, final byte[] adpcm) {

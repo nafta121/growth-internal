@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.Cipher;
@@ -118,11 +119,23 @@ final class MeshAccess {
         return aes128Block(baseKey, pt);
     }
 
-    static byte[] aes128Block(byte[] key16, byte[] block16) {
+    static Cipher initCipher(byte[] key16) {
         try {
             Cipher c = Cipher.getInstance("AES/ECB/NoPadding");
             c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key16, "AES"));
-            return c.doFinal(block16);
+            return c;
+        } catch (Exception e) {
+            throw new IllegalStateException("AES-128 unavailable", e);
+        }
+    }
+
+    static byte[] aes128Block(byte[] key16, byte[] block16) {
+        return aes128Block(initCipher(key16), block16);
+    }
+
+    static byte[] aes128Block(Cipher cipher, byte[] block16) {
+        try {
+            return cipher.doFinal(block16);
         } catch (Exception e) {
             throw new IllegalStateException("AES-128 unavailable", e);
         }
@@ -143,6 +156,8 @@ final class MeshAccess {
         private byte[] baseKey;
         private byte[] sessionEncKey;
         private byte[] sessionDecKey;
+        private Cipher encCipher;
+        private Cipher decCipher;
         private final byte[] encNonce = new byte[NONCE_LEN];
         private final byte[] decNonce = new byte[NONCE_LEN];
         private int txCounter;
@@ -191,6 +206,7 @@ final class MeshAccess {
 
                 RNG.nextBytes(decNonce);
                 sessionDecKey = deriveSessionKey(baseKey, partnerId, decNonce);
+                decCipher = initCipher(sessionDecKey);
                 rxCounter = 0;
                 state = STATE_WAITING_FOR_SNONCE;
 
@@ -210,10 +226,12 @@ final class MeshAccess {
                 b.getShort(); // virtualPartnerId assigned by peripheral
                 b.get(encNonce);
                 sessionEncKey = deriveSessionKey(baseKey, myNodeId, encNonce);
+                encCipher = initCipher(sessionEncKey);
                 txCounter = 0;
 
                 RNG.nextBytes(decNonce);
                 sessionDecKey = deriveSessionKey(baseKey, myNodeId, decNonce);
+                decCipher = initCipher(sessionDecKey);
                 rxCounter = 0;
                 state = STATE_WAITING_FOR_DONE;
 
@@ -237,6 +255,7 @@ final class MeshAccess {
                 b.getShort(); // receiver
                 b.get(encNonce);
                 sessionEncKey = deriveSessionKey(baseKey, partnerId, encNonce);
+                encCipher = initCipher(sessionEncKey);
                 txCounter = 0;
                 state = STATE_ENCRYPTED;
 
@@ -260,10 +279,10 @@ final class MeshAccess {
         }
 
         synchronized byte[] encryptPacket(byte[] plain) {
-            if (plain == null || sessionEncKey == null) return null;
+            if (plain == null || encCipher == null) return null;
             int seq = txCounter++;
-            byte[] cipher = xorKeystream(sessionEncKey, encNonce, seq, plain, 0, plain.length);
-            byte[] mic = computeMic(sessionEncKey, encNonce, seq, cipher, 0, cipher.length);
+            byte[] cipher = xorKeystream(encCipher, encNonce, seq, plain, 0, plain.length);
+            byte[] mic = computeMic(encCipher, encNonce, seq, cipher, 0, cipher.length);
             byte[] out = new byte[cipher.length + MIC_LEN];
             System.arraycopy(cipher, 0, out, 0, cipher.length);
             System.arraycopy(mic, 0, out, cipher.length, MIC_LEN);
@@ -271,12 +290,12 @@ final class MeshAccess {
         }
 
         synchronized byte[] decryptPacket(byte[] packet) {
-            if (packet == null || packet.length <= MIC_LEN || sessionDecKey == null) return null;
+            if (packet == null || packet.length <= MIC_LEN || decCipher == null) return null;
             int cipherLen = packet.length - MIC_LEN;
             // Allow resync within a small forward window if a BLE notification was dropped
             for (int delta = 0; delta < 8; delta++) {
                 int candidateSeq = rxCounter + delta;
-                byte[] expectedMic = computeMic(sessionDecKey, decNonce, candidateSeq, packet, 0, cipherLen);
+                byte[] expectedMic = computeMic(decCipher, decNonce, candidateSeq, packet, 0, cipherLen);
                 boolean match = true;
                 for (int i = 0; i < MIC_LEN; i++) {
                     if (expectedMic[i] != packet[cipherLen + i]) {
@@ -286,7 +305,7 @@ final class MeshAccess {
                 }
                 if (match) {
                     rxCounter = candidateSeq + 1;
-                    return xorKeystream(sessionDecKey, decNonce, candidateSeq, packet, 0, cipherLen);
+                    return xorKeystream(decCipher, decNonce, candidateSeq, packet, 0, cipherLen);
                 }
             }
             return null;
@@ -354,7 +373,7 @@ final class MeshAccess {
             return null;
         }
 
-        private static byte[] xorKeystream(byte[] key, byte[] nonce8, int seq, byte[] in, int off, int len) {
+        private static byte[] xorKeystream(Cipher cipher, byte[] nonce8, int seq, byte[] in, int off, int len) {
             byte[] out = new byte[len];
             byte[] block = new byte[16];
             int blockIdx = 0;
@@ -368,7 +387,7 @@ final class MeshAccess {
                 block[13] = (byte) ((blockIdx >>> 8) & 0xFF);
                 block[14] = 0;
                 block[15] = 1;
-                byte[] ks = aes128Block(key, block);
+                byte[] ks = aes128Block(cipher, block);
                 int rem = Math.min(16, len - pos);
                 for (int i = 0; i < rem; i++) {
                     out[pos + i] = (byte) (in[off + pos + i] ^ ks[i]);
@@ -378,7 +397,7 @@ final class MeshAccess {
             return out;
         }
 
-        private static byte[] computeMic(byte[] key, byte[] nonce8, int seq, byte[] cipher, int off, int len) {
+        private static byte[] computeMic(Cipher cipher, byte[] nonce8, int seq, byte[] cipherText, int off, int len) {
             byte[] mac = new byte[16];
             System.arraycopy(nonce8, 0, mac, 0, NONCE_LEN);
             mac[8] = (byte) (seq & 0xFF);
@@ -389,13 +408,13 @@ final class MeshAccess {
             mac[13] = (byte) ((len >>> 8) & 0xFF);
             mac[14] = 0x4D;
             mac[15] = 0x41;
-            mac = aes128Block(key, mac);
+            mac = aes128Block(cipher, mac);
             for (int pos = 0; pos < len; pos += 16) {
                 int rem = Math.min(16, len - pos);
                 for (int i = 0; i < rem; i++) {
-                    mac[i] ^= cipher[off + pos + i];
+                    mac[i] ^= cipherText[off + pos + i];
                 }
-                mac = aes128Block(key, mac);
+                mac = aes128Block(cipher, mac);
             }
             return Arrays.copyOf(mac, MIC_LEN);
         }
@@ -491,6 +510,7 @@ final class MeshAccess {
     private final IncomingListener listener;
     private final Map<String, Pipe> serverPipes = new ConcurrentHashMap<String, Pipe>();
     private final Map<String, Integer> deviceMtus = new ConcurrentHashMap<String, Integer>();
+    private final Map<String, Semaphore> serverGates = new ConcurrentHashMap<String, Semaphore>();
     private BluetoothGattServer gattServer;
     private BluetoothGattCharacteristic txChar;
 
@@ -540,6 +560,7 @@ final class MeshAccess {
         }
         serverPipes.clear();
         deviceMtus.clear();
+        serverGates.clear();
         BluetoothGattServer srv = gattServer;
         gattServer = null;
         if (srv != null) {
@@ -553,10 +574,20 @@ final class MeshAccess {
             String addr = device.getAddress();
             if (newState == BluetoothProfile.STATE_DISCONNECTED && addr != null) {
                 deviceMtus.remove(addr);
+                Semaphore gate = serverGates.remove(addr);
+                if (gate != null && gate.availablePermits() == 0) gate.release();
                 Pipe p = serverPipes.remove(addr);
                 if (p != null) {
                     try { p.close(); } catch (IOException ignored) {}
                 }
+            }
+        }
+
+        @Override public void onNotificationSent(BluetoothDevice device, int status) {
+            if (device == null || device.getAddress() == null) return;
+            Semaphore gate = serverGates.get(device.getAddress());
+            if (gate != null && gate.availablePermits() == 0) {
+                gate.release();
             }
         }
 
@@ -611,6 +642,8 @@ final class MeshAccess {
         Pipe existing = serverPipes.get(addr);
         if (existing != null) return existing;
         try {
+            final Semaphore gate = new Semaphore(1);
+            serverGates.put(addr, gate);
             Session s = new Session(false, (short) (addr.hashCode() & 0x7FFF),
                     FM_KEY_NETWORK, TUNNEL_REMOTE_MESH);
             Pipe p = new Pipe(s, new PacketSender() {
@@ -618,14 +651,27 @@ final class MeshAccess {
                     BluetoothGattServer srv = gattServer;
                     BluetoothGattCharacteristic tx = txChar;
                     if (srv == null || tx == null || packet == null) return;
+                    boolean acquired = false;
                     try {
-                        tx.setValue(packet);
-                        srv.notifyCharacteristicChanged(device, tx, false);
-                    } catch (RuntimeException ignored) {}
+                        acquired = gate.tryAcquire(80, TimeUnit.MILLISECONDS);
+                        synchronized (tx) {
+                            tx.setValue(packet);
+                            boolean ok = srv.notifyCharacteristicChanged(device, tx, false);
+                            if (!ok && acquired && gate.availablePermits() == 0) {
+                                gate.release();
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } catch (RuntimeException e) {
+                        if (acquired && gate.availablePermits() == 0) gate.release();
+                    }
                 }
             }, new Closeable() {
                 @Override public void close() {
                     serverPipes.remove(addr);
+                    Semaphore g = serverGates.remove(addr);
+                    if (g != null && g.availablePermits() == 0) g.release();
                 }
             });
             Integer mtu = deviceMtus.get(addr);
@@ -645,7 +691,9 @@ final class MeshAccess {
         if (ctx == null || device == null) return null;
         final CountDownLatch latch = new CountDownLatch(1);
         final Pipe[] resultPipe = new Pipe[1];
+        final Pipe[] createdPipe = new Pipe[1];
         final BluetoothGatt[] gattRef = new BluetoothGatt[1];
+        final Semaphore writeGate = new Semaphore(1);
 
         BluetoothGattCallback cb = new BluetoothGattCallback() {
             private BluetoothGattCharacteristic rx;
@@ -662,11 +710,19 @@ final class MeshAccess {
                         latch.countDown();
                     }
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    if (writeGate.availablePermits() == 0) writeGate.release();
                     if (pipe != null) {
                         try { pipe.close(); } catch (IOException ignored) {}
                     }
                     try { gatt.close(); } catch (RuntimeException ignored) {}
                     latch.countDown();
+                }
+            }
+
+            @Override public void onCharacteristicWrite(BluetoothGatt gatt,
+                    BluetoothGattCharacteristic characteristic, int status) {
+                if (writeGate.availablePermits() == 0) {
+                    writeGate.release();
                 }
             }
 
@@ -703,18 +759,31 @@ final class MeshAccess {
                     pipe = new Pipe(session, new PacketSender() {
                         @Override public void sendPacket(byte[] packet) {
                             if (rx == null || packet == null) return;
+                            boolean acquired = false;
                             try {
-                                rx.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-                                rx.setValue(packet);
-                                gatt.writeCharacteristic(rx);
-                            } catch (RuntimeException ignored) {}
+                                acquired = writeGate.tryAcquire(80, TimeUnit.MILLISECONDS);
+                                synchronized (rx) {
+                                    rx.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                                    rx.setValue(packet);
+                                    boolean ok = gatt.writeCharacteristic(rx);
+                                    if (!ok && acquired && writeGate.availablePermits() == 0) {
+                                        writeGate.release();
+                                    }
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            } catch (RuntimeException e) {
+                                if (acquired && writeGate.availablePermits() == 0) writeGate.release();
+                            }
                         }
                     }, new Closeable() {
                         @Override public void close() {
+                            if (writeGate.availablePermits() == 0) writeGate.release();
                             try { gatt.disconnect(); } catch (RuntimeException ignored) {}
                             try { gatt.close(); } catch (RuntimeException ignored) {}
                         }
                     });
+                    createdPipe[0] = pipe;
                     gatt.setCharacteristicNotification(tx, true);
                     BluetoothGattDescriptor cccd = tx.getDescriptor(CCCD_UUID);
                     if (cccd != null) {
@@ -756,17 +825,26 @@ final class MeshAccess {
             if (g == null) return null;
             boolean ok = latch.await(5000, TimeUnit.MILLISECONDS) && resultPipe[0] != null;
             if (!ok) {
+                if (createdPipe[0] != null) {
+                    try { createdPipe[0].close(); } catch (IOException ignored) {}
+                }
                 try { g.disconnect(); } catch (RuntimeException ignored) {}
                 try { g.close(); } catch (RuntimeException ignored) {}
                 return null;
             }
             return resultPipe[0];
         } catch (InterruptedException e) {
+            if (createdPipe[0] != null) {
+                try { createdPipe[0].close(); } catch (IOException ignored) {}
+            }
             if (gattRef[0] != null) {
                 try { gattRef[0].close(); } catch (RuntimeException ignored) {}
             }
             return null;
         } catch (RuntimeException e) {
+            if (createdPipe[0] != null) {
+                try { createdPipe[0].close(); } catch (IOException ignored) {}
+            }
             return null;
         }
     }

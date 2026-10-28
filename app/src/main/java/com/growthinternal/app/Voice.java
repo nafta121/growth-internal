@@ -10,6 +10,7 @@ import android.media.audiofx.NoiseSuppressor;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Captures the microphone and plays incoming voice, as raw 16 kHz mono PCM. */
 final class Voice {
@@ -22,6 +23,7 @@ final class Voice {
     private final Map<String, byte[]> lastFrames = new ConcurrentHashMap<String, byte[]>();
     private final Map<String, Long> lastTimes = new ConcurrentHashMap<String, Long>();
     private volatile boolean capturing;
+    private AtomicBoolean activeCapture;
     private Thread captureThread;
 
     /**
@@ -64,12 +66,14 @@ final class Voice {
             NoiseSuppressor ns = NoiseSuppressor.create(rec.getAudioSessionId());
             if (ns != null) ns.setEnabled(true);
         }
+        final AtomicBoolean sessionActive = new AtomicBoolean(true);
+        activeCapture = sessionActive;
         capturing = true;
         captureThread = new Thread(new Runnable() {
             @Override public void run() {
                 rec.startRecording();
                 byte[] buf = new byte[FRAME_BYTES];
-                while (capturing) {
+                while (sessionActive.get()) {
                     int n = rec.read(buf, 0, buf.length);
                     if (n > 0) {
                         byte[] copy = new byte[n];
@@ -86,7 +90,15 @@ final class Voice {
 
     synchronized void stopCapture() {
         capturing = false;
+        if (activeCapture != null) {
+            activeCapture.set(false);
+            activeCapture = null;
+        }
+        Thread t = captureThread;
         captureThread = null;
+        if (t != null && t != Thread.currentThread()) {
+            try { t.join(250); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+        }
     }
 
     /** Called from network threads; each sender gets its own track. */

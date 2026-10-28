@@ -175,6 +175,7 @@ final class Bt {
         new Thread(new Runnable() {
             @Override public void run() {
                 BluetoothSocket sock = null;
+                MeshAccess.Pipe tunnel = null;
                 boolean usedL2cap = false;
                 try {
                     if (adapter != null) {
@@ -195,7 +196,7 @@ final class Bt {
                         }
                     }
                     if (sock == null) {
-                        MeshAccess.Pipe tunnel = meshAccess.openTunnel(
+                        tunnel = meshAccess.openTunnel(
                                 device, MeshAccess.FM_KEY_NETWORK, MeshAccess.TUNNEL_REMOTE_MESH);
                         if (tunnel != null) {
                             hub.addStreamLink(tunnel.in, tunnel.out, tunnel, true);
@@ -209,6 +210,9 @@ final class Bt {
                     hub.addStreamLink(sock.getInputStream(), sock.getOutputStream(), sock, true);
                     if (onConnected != null) onConnected.run();
                 } catch (IOException | RuntimeException e) {
+                    if (tunnel != null) {
+                        try { tunnel.close(); } catch (IOException ignored) {}
+                    }
                     if (sock != null) {
                         try { sock.close(); } catch (IOException ignored) {}
                     }

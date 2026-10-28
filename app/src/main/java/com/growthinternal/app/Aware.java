@@ -50,11 +50,6 @@ final class Aware {
         final PeerHandle handle;
         final DiscoverySession session;
 
-        Peer(String name, int port, boolean inGroup, int memberCount,
-                PeerHandle handle, DiscoverySession session) {
-            this(name, port, inGroup, memberCount, 0, handle, session);
-        }
-
         Peer(String name, int port, boolean inGroup, int memberCount, int clusterId,
                 PeerHandle handle, DiscoverySession session) {
             this.name = name;
@@ -125,10 +120,6 @@ final class Aware {
         }
     }
 
-    void start(String name, int port, boolean inGroup, int memberCount) {
-        start(name, port, inGroup, memberCount, 0);
-    }
-
     void start(String name, int port, boolean inGroup, int memberCount, int clusterId) {
         lastName = name != null ? name : "";
         lastPort = port;
@@ -156,10 +147,6 @@ final class Aware {
         } catch (RuntimeException e) {
             attaching = false;
         }
-    }
-
-    void updatePublish(String name, int port, boolean inGroup, int memberCount) {
-        updatePublish(name, port, inGroup, memberCount, lastClusterId);
     }
 
     void updatePublish(String name, int port, boolean inGroup, int memberCount, int clusterId) {

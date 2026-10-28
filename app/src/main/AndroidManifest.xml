@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.growthinternal.app"
-    android:versionCode="19"
-    android:versionName="0.18.0">
+    android:versionCode="20"
+    android:versionName="0.19.0">
 
     <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="33" />
 
@@ -57,6 +57,10 @@
             android:name=".CaptureProvider"
             android:authorities="com.growthinternal.app.capture"
             android:exported="false"
-            android:grantUriPermissions="true" />
+            android:grantUriPermissions="false">
+            <grant-uri-permission android:path="/photo.jpg" />
+            <grant-uri-permission android:path="/video.mp4" />
+            <grant-uri-permission android:path="/growth-internal.apk" />
+        </provider>
     </application>
 </manifest>

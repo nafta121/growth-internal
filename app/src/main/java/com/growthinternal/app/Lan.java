@@ -29,10 +29,6 @@ final class Lan {
         final int memberCount;
         final int clusterId;
 
-        Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount) {
-            this(name, address, port, inGroup, memberCount, 0);
-        }
-
         Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount, int clusterId) {
             this.name = name;
             this.address = address;
@@ -81,10 +77,6 @@ final class Lan {
         }, "lan-udp");
         t.setDaemon(true);
         t.start();
-    }
-
-    void announce(final String name, final int hubPort, final boolean inGroup, final int memberCount) {
-        announce(name, hubPort, inGroup, memberCount, 0);
     }
 
     void announce(final String name, final int hubPort, final boolean inGroup,

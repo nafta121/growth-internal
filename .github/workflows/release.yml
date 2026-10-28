@@ -67,12 +67,14 @@ jobs:
           VC=$(aapt dump badging build/growth-internal.apk | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
           CERT=$(apksigner verify --print-certs build/growth-internal.apk | grep -m1 'SHA-256 digest' | sed 's/.*: //')
           gh release upload "$TAG" build/growth-internal.apk build/growth-internal.apk.sha256 --clobber
+          CHANGELOG_SECTION=$(awk "/^## \\[$VERSION\\]/{flag=1; next} /^## \\[/{flag=0} flag" CHANGELOG.md)
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            CHANGELOG_SECTION="- Pembaruan aplikasi Growth Internal v$VERSION. Lihat rincian lengkap di [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)."
+          fi
           gh release edit "$TAG" --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp).
 
           ### Perubahan di v$VERSION
-          - **Audit Menyeluruh \`android-skills\` & \`/ponytail-audit\` (\`MapView\`, \`MainActivity\`, \`ApkShare\`, \`Aware\`, \`KeepAliveService\`)**: Decode *tile* peta offline asinkron di luar UI thread (\`tile-loader\`), penyimpanan video & ekstraksi *thumbnail* di luar thread \`link-reader\` agar suara Walkie-Talkie tidak terputus, *ephemeral port fallback* pada server HTTP \`ApkShare\`, pembatasan memori \`recentMeshTexts\` & *timeout* aman 6 jam pada \`WakeLock\`, serta konkurensi Wi‑Fi Aware per-\`PeerHandle\`.
-          - **Adopsi Fitur MeshLive Offline (\`Ble\`, \`Bt\`, \`Voice\`, \`Hub\`, \`ApkShare\`)**: \`AdvertisingWatchdog\` & *Wi‑Fi/BLE Coexistence*, \`BoundedMediaAge\` (350 ms) & *Packet Loss Concealment* (\`Voice.concealFrame\`), sensor *proximity earpiece* otomatis, *Store-and-Forward* riwayat grup, **Pesan Suara ADPCM 10 Detik**, dan **Bagikan APK Offline (Tanpa Internet)**.
-          - **Keystore Konsisten untuk Kemudahan Update**: Ditandatangani dengan *keystore* tetap sehingga pembaruan berikutnya langsung terpasang di atas aplikasi yang ada. Lihat rincian lengkap di [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md).
+          $CHANGELOG_SECTION
 
           ### Cek keaslian file
           - Versi build (versionCode): $VC
