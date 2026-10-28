@@ -127,10 +127,16 @@ final class Aware {
     private int lastCount;
     private int lastClusterId;
 
+    Aware(Listener listener) {
+        this(null, listener);
+    }
+
     Aware(Context ctx, Listener listener) {
-        this.ctx = ctx.getApplicationContext();
+        this.ctx = ctx != null ? ctx.getApplicationContext() : null;
         this.listener = listener;
-        this.cm = (ConnectivityManager) this.ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        this.cm = this.ctx != null
+                ? (ConnectivityManager) this.ctx.getSystemService(Context.CONNECTIVITY_SERVICE)
+                : null;
         if (isSupported(this.ctx)) {
             try {
                 mgr = (WifiAwareManager) this.ctx.getSystemService("wifiaware");
