@@ -455,7 +455,7 @@ final class Hub implements Link.Listener {
     }
 
     @Override public void onFrame(Link from, Frame f) {
-        if (f.type != Frame.HELLO) {
+        if (from != null && f.type != Frame.HELLO) {
             Link old = from.replacedLink;
             if (old != null) {
                 from.replacedLink = null;
