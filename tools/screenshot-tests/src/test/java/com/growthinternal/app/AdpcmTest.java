@@ -36,7 +36,7 @@ public class AdpcmTest {
         }
 
         byte[] encoded = Adpcm.encode(pcm);
-        assertEquals(160, encoded.length); // 4:1 compression (640 -> 160 bytes)
+        assertEquals(164, encoded.length); // 4-byte header + 160 bytes of 4:1 ADPCM nibbles
 
         byte[] decoded = Adpcm.decode(encoded);
         assertEquals(640, decoded.length);
