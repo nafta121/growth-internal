@@ -175,10 +175,18 @@ final class Lan {
         return false;
     }
 
+    static boolean isProSeSidelinkInterface(String ifName) {
+        if (ifName == null) return false;
+        String lower = ifName.trim().toLowerCase();
+        return lower.startsWith("prose") || lower.startsWith("pc5")
+                || lower.startsWith("sidelink") || lower.startsWith("sl");
+    }
+
     static boolean isPreferredWifiInterface(String ifName) {
         if (ifName == null) return false;
         String lower = ifName.trim().toLowerCase();
-        return lower.startsWith("wlan") || lower.startsWith("ap")
+        return isProSeSidelinkInterface(lower)
+                || lower.startsWith("wlan") || lower.startsWith("ap")
                 || lower.startsWith("softap") || lower.startsWith("swlan")
                 || lower.startsWith("wifi") || lower.startsWith("uap");
     }

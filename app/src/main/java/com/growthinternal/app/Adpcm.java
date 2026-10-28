@@ -19,6 +19,13 @@ final class Adpcm {
             11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
     };
 
+    static final int NARROWBAND_FLAG = 0x02;
+    private static final int GF_POLY = 0x11B;
+    static final int HEMB_WINDOW = 4;
+    static final int HEMB_HEADER = 6;
+    static final int[] HEMB_DEFAULT_COEFFS = { 1, 2, 3, 5 };
+    static final int[] HEMB_STREAM_COEFFS = { 1, 1, 1, 1 };
+
     private Adpcm() { }
 
     static byte[] encode(byte[] pcm) {
@@ -60,11 +67,35 @@ final class Adpcm {
         return out;
     }
 
+    /**
+     * 8:1 Narrowband 8 kHz IMA ADPCM (32 kbps, 84 bytes per 20 ms frame) for multi-hop
+     * kilometer chains and Wi-Fi Aware L2 Sidelink. Decimates 16 kHz -> 8 kHz with a
+     * 2-tap anti-aliasing filter and marks bit 1 (0x02) of header byte 3.
+     */
+    static byte[] encodeNarrowband(byte[] pcm16k) {
+        if (pcm16k == null || pcm16k.length < 4) return encode(pcm16k);
+        int inSamples = pcm16k.length / 2;
+        int outSamples = inSamples / 2;
+        byte[] pcm8k = new byte[outSamples * 2];
+        for (int i = 0; i < outSamples; i++) {
+            int i0 = i * 4;
+            int s0 = (short) ((pcm16k[i0] & 0xff) | (pcm16k[i0 + 1] << 8));
+            int s1 = (short) ((pcm16k[i0 + 2] & 0xff) | (pcm16k[i0 + 3] << 8));
+            int avg = (s0 + s1) >> 1;
+            pcm8k[i * 2] = (byte) avg;
+            pcm8k[i * 2 + 1] = (byte) (avg >> 8);
+        }
+        byte[] out = encode(pcm8k);
+        if (out.length >= 4) out[3] |= NARROWBAND_FLAG;
+        return out;
+    }
+
     static byte[] decode(byte[] adpcm) {
         if (adpcm == null || adpcm.length <= 4) return new byte[0];
         int pred = (short) ((adpcm[0] & 0xff) | (adpcm[1] << 8));
         int idx = Math.max(0, Math.min(88, adpcm[2] & 0xff));
         int odd = adpcm[3] & 1;
+        boolean narrowband = (adpcm[3] & NARROWBAND_FLAG) != 0;
         int samples = (adpcm.length - 4) * 2 - odd;
         byte[] pcm = new byte[samples * 2];
         for (int i = 0; i < samples; i++) {
@@ -80,6 +111,115 @@ final class Adpcm {
             pcm[i * 2] = (byte) pred;
             pcm[i * 2 + 1] = (byte) (pred >> 8);
         }
-        return pcm;
+        if (!narrowband || samples == 0) return pcm;
+        // Linear 1:2 upsampling from 8 kHz back to 16 kHz (640 bytes per 20 ms)
+        byte[] up = new byte[samples * 4];
+        for (int i = 0; i < samples; i++) {
+            int s0 = (short) ((pcm[i * 2] & 0xff) | (pcm[i * 2 + 1] << 8));
+            int s1 = (i + 1 < samples)
+                    ? (short) ((pcm[(i + 1) * 2] & 0xff) | (pcm[(i + 1) * 2 + 1] << 8))
+                    : s0;
+            int mid = (s0 + s1) >> 1;
+            int dst = i * 4;
+            up[dst] = (byte) s0;
+            up[dst + 1] = (byte) (s0 >> 8);
+            up[dst + 2] = (byte) mid;
+            up[dst + 3] = (byte) (mid >> 8);
+        }
+        return up;
+    }
+
+    /** MeshSat HeMB GF(2^8) multiplication modulo x^8 + x^4 + x^3 + x + 1 (0x11B). */
+    static int gfMul(int a, int b) {
+        int res = 0;
+        int x = a & 0xFF;
+        int y = b & 0xFF;
+        for (int i = 0; i < 8; i++) {
+            if ((y & 1) != 0) res ^= x;
+            boolean hi = (x & 0x80) != 0;
+            x = (x << 1) & 0xFF;
+            if (hi) x ^= (GF_POLY & 0xFF);
+            y >>>= 1;
+        }
+        return res & 0xFF;
+    }
+
+    /** MeshSat HeMB GF(2^8) multiplicative inverse via Fermat's little theorem a^254. */
+    static int gfInv(int a) {
+        int x = a & 0xFF;
+        if (x == 0) return 0;
+        int res = 1;
+        int exp = 254;
+        while (exp > 0) {
+            if ((exp & 1) != 0) res = gfMul(res, x);
+            x = gfMul(x, x);
+            exp >>>= 1;
+        }
+        return res;
+    }
+
+    /**
+     * Encodes a MeshSat HeMB GF(2^8) RLNC parity frame over 4 consecutive voice frames.
+     * Header: [seqBase_hi, seqBase_lo, c0, c1, c2, c3] followed by GF(2^8) linear combination.
+     */
+    static byte[] encodeHembParity(int seqBase, byte[][] frames) {
+        return encodeHembParity(seqBase, frames, HEMB_STREAM_COEFFS);
+    }
+
+    static byte[] encodeHembParity(int seqBase, byte[][] frames, int[] coeffs) {
+        if (frames == null || frames.length != HEMB_WINDOW || coeffs == null || coeffs.length != HEMB_WINDOW) {
+            return null;
+        }
+        int len = frames[0] != null ? frames[0].length : 0;
+        if (len == 0) return null;
+        for (int i = 1; i < HEMB_WINDOW; i++) {
+            if (frames[i] == null || frames[i].length != len) return null;
+        }
+        byte[] out = new byte[HEMB_HEADER + len];
+        out[0] = (byte) ((seqBase >>> 8) & 0xFF);
+        out[1] = (byte) (seqBase & 0xFF);
+        for (int j = 0; j < HEMB_WINDOW; j++) {
+            out[2 + j] = (byte) (coeffs[j] & 0xFF);
+        }
+        for (int b = 0; b < len; b++) {
+            int acc = 0;
+            for (int j = 0; j < HEMB_WINDOW; j++) {
+                acc ^= gfMul(coeffs[j] & 0xFF, frames[j][b] & 0xFF);
+            }
+            out[HEMB_HEADER + b] = (byte) acc;
+        }
+        return out;
+    }
+
+    /**
+     * Reconstructs a missing voice frame at missingIdx in 0 ms using GF(2^8) Gauss-Jordan elimination
+     * when the other 3 frames in the window and the HeMB parity packet have arrived.
+     */
+    static byte[] recoverHembFrame(byte[][] frames, int missingIdx, byte[] parityPacket) {
+        if (frames == null || frames.length != HEMB_WINDOW
+                || missingIdx < 0 || missingIdx >= HEMB_WINDOW
+                || parityPacket == null || parityPacket.length <= HEMB_HEADER) {
+            return null;
+        }
+        int len = parityPacket.length - HEMB_HEADER;
+        int cMissing = parityPacket[2 + missingIdx] & 0xFF;
+        if (cMissing == 0) return null;
+        for (int j = 0; j < HEMB_WINDOW; j++) {
+            if (j == missingIdx) continue;
+            if (frames[j] == null || frames[j].length != len) return null;
+        }
+        int inv = gfInv(cMissing);
+        byte[] recovered = new byte[len];
+        for (int b = 0; b < len; b++) {
+            int syn = parityPacket[HEMB_HEADER + b] & 0xFF;
+            for (int j = 0; j < HEMB_WINDOW; j++) {
+                if (j != missingIdx) {
+                    int cj = parityPacket[2 + j] & 0xFF;
+                    syn ^= gfMul(cj, frames[j][b] & 0xFF);
+                }
+            }
+            recovered[b] = (byte) gfMul(inv, syn);
+        }
+        return recovered;
     }
 }

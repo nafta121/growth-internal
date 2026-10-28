@@ -177,7 +177,7 @@ public class AdpcmTest {
         assertEquals(0x0085, b.psm);
         assertTrue(b.inGroup);
 
-        // BLE Mesh packet with TTL=5 and deduplication
+        // BLE Mesh packet with TTL=15 and deduplication
         byte[] meshRaw = Ble.packMesh(0x1234, Ble.DEFAULT_TTL, Ble.MESH_TEXT,
                 "Pos 3", "Aman".getBytes(Hub.UTF8));
         assertNotNull(meshRaw);
@@ -185,7 +185,7 @@ public class AdpcmTest {
         Ble.MeshPacket pkt = Ble.unpackMesh(meshRaw);
         assertNotNull(pkt);
         assertEquals(0x1234, pkt.msgId);
-        assertEquals(5, pkt.ttl);
+        assertEquals(15, pkt.ttl);
         assertEquals(Ble.MESH_TEXT, pkt.type);
         assertEquals("Pos 3", pkt.sender);
         assertEquals("Aman", new String(pkt.body, Hub.UTF8));
@@ -873,6 +873,141 @@ public class AdpcmTest {
 
         hubFar.stop();
         hubC.stop();
+        hubB.stop();
+        hubA.stop();
+    }
+
+    @Test public void proseAwareSidelinkHembVoiceSmaz2And15HopKilometerMesh() throws Exception {
+        // 1. Stage 1: 8 kHz Narrowband ADPCM (84B) & MeshSat HeMB GF(2^8) RLNC Voice FEC
+        byte[] pcm = new byte[640];
+        for (int i = 0; i < 320; i++) {
+            short s = (short) (Math.sin(i * 0.25) * 14000);
+            pcm[i * 2] = (byte) (s & 0xff);
+            pcm[i * 2 + 1] = (byte) ((s >> 8) & 0xff);
+        }
+        byte[] nb = Adpcm.encodeNarrowband(pcm);
+        assertEquals("8 kHz narrowband ADPCM must be 84 bytes (32 kbps)", 84, nb.length);
+        assertTrue("Narrowband header flag must be set", (nb[3] & Adpcm.NARROWBAND_FLAG) != 0);
+        byte[] upsampled = Adpcm.decode(nb);
+        assertEquals("Decoded narrowband ADPCM must upsample back to 640B 16 kHz PCM", 640, upsampled.length);
+
+        // GF(2^8) field inversion identity: a * inv(a) == 1 for all non-zero elements
+        for (int a = 1; a < 256; a++) {
+            assertEquals(1, Adpcm.gfMul(a, Adpcm.gfInv(a)));
+        }
+
+        // HeMB 4-frame sliding-window parity encode & exact recovery of a lost voice frame
+        byte[][] window = new byte[4][84];
+        for (int k = 0; k < 4; k++) {
+            for (int i = 0; i < 84; i++) window[k][i] = (byte) ((k * 37 + i * 13 + 7) & 0xff);
+        }
+        byte[] parity = Adpcm.encodeHembParity(40, window, Adpcm.HEMB_DEFAULT_COEFFS);
+        assertNotNull(parity);
+        assertEquals(6 + 84, parity.length);
+
+        byte[][] rxWindow = new byte[][] { window[0], window[1], null, window[3] };
+        byte[] recovered = Adpcm.recoverHembFrame(rxWindow, 2, parity);
+        assertNotNull("HeMB must reconstruct missing voice frame #2 in 0 ms", recovered);
+        assertArrayEquals(window[2], recovered);
+
+        // 2. Stage 2: ProSe-Style Wi-Fi Aware L2 Sidelink Multi-Hop Relay (< 255B)
+        byte[] slAudio = Aware.packSidelink(0x55AA, Aware.DEFAULT_SIDELINK_TTL,
+                Aware.SIDELINK_AUDIO, "Pos Ridge", nb);
+        assertNotNull(slAudio);
+        assertTrue("84B narrowband voice + Sidelink header must fit within 255B L2 limit",
+                slAudio.length <= Aware.MAX_SIDELINK_BYTES);
+        Aware.SidelinkPacket slPkt = Aware.unpackSidelink(slAudio);
+        assertNotNull(slPkt);
+        assertEquals(0x55AA, slPkt.msgId);
+        assertEquals(15, slPkt.ttl);
+        assertEquals(Aware.SIDELINK_AUDIO, slPkt.type);
+        assertEquals("Pos Ridge", slPkt.sender);
+        assertArrayEquals(nb, slPkt.body);
+
+        Aware aware = new Aware(null);
+        assertTrue(aware.recordSeenSidelink(0x55AA));
+        assertFalse("Duplicate Sidelink msgId must be dropped", aware.recordSeenSidelink(0x55AA));
+
+        // 3. Stage 3: Extended 15-Hop BLE Mesh + SMAZ2 Indonesian Field Dictionary Compression
+        assertEquals(15, Ble.DEFAULT_TTL);
+        String fieldText = "prioritas butuh backup segera di pos 1 jalur aman menuju basecamp";
+        byte[] comp = Ble.compressText(fieldText);
+        assertTrue("SMAZ2 must compress Indonesian field phrase significantly",
+                comp.length < fieldText.getBytes(Hub.UTF8).length);
+        assertEquals(fieldText, Ble.decompressText(comp));
+
+        java.util.List<byte[]> smazFrags = Ble.splitMeshText(fieldText, 9);
+        assertTrue("65-byte Indonesian phrase compressed with SMAZ2 must fit in <= 7 BLE fragments",
+                smazFrags.size() <= Ble.MAX_FRAG_PARTS);
+        Ble ble = new Ble(null);
+        byte[] reassembled = null;
+        for (byte[] frag : smazFrags) {
+            reassembled = ble.reassembleMeshBody("Komandan", Ble.MESH_TEXT, frag);
+        }
+        assertNotNull(reassembled);
+        assertEquals(fieldText, new String(reassembled, Hub.UTF8));
+
+        // 3GPP Rel-12/13 ProSe interface detection, Deaf-Link Watchdog & UE-to-Network Gateway Selection
+        assertTrue(Lan.isProSeSidelinkInterface("prose0"));
+        assertTrue(Lan.isProSeSidelinkInterface("pc5_0"));
+        assertTrue(Lan.isPreferredWifiInterface("prose0"));
+
+        MeshCoordinator coord = new MeshCoordinator();
+        coord.recordGatewayPeer("Pos Lembah", false);
+        coord.recordGatewayPeer("Pos Bukit LTE", true);
+        coord.evaluateRssi("Pos Bukit LTE", -70, 1000L);
+        assertEquals("Pos Bukit LTE", coord.selectBestGatewayPeer());
+        coord.evaluateRssi("Pos Lembah", -75, 5000L);
+        assertTrue("Link with TX but 0 RX for >12s must be flagged deaf",
+                coord.isReceiveDeaf("Pos Lembah", 20000L, 25000L));
+
+        // 4. End-to-End Live Hub: HeMB 0ms Voice Recovery + Sidelink Voice Bridge + MCPTT Priority
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        int port = 19163;
+        HubTest.Rec rA = new HubTest.Rec();
+        HubTest.Rec rB = new HubTest.Rec();
+        Hub hubA = new Hub("Pos 1", null, rA).port(port);
+        hubA.startServer(lo);
+        Thread.sleep(200);
+
+        Hub hubB = new Hub("Pos 2", null, rB).port(port);
+        hubB.startClient(lo);
+        HubTest.waitFor(rA, "join:Pos 2");
+        HubTest.waitFor(rB, "join:Pos 1");
+
+        // Put Pos 1 in SOS priority state and verify MCPTT priority speaker detection
+        Presence sos = new Presence();
+        sos.status = Presence.SOS;
+        hubA.sendPresence(sos.encode());
+        HubTest.waitFor(rB, "presence:Pos 1:4");
+        assertTrue(hubA.isPrioritySpeaker("Pos 1"));
+        assertTrue(hubB.isPrioritySpeaker("Pos 1"));
+
+        // Simulate 4-frame window on Hub B where frame #1 is dropped in transit, then HeMB parity arrives
+        byte[][] adpcmWin = new byte[4][];
+        for (int k = 0; k < 4; k++) {
+            pcm[0] = (byte) (k * 50);
+            adpcmWin[k] = Adpcm.encodeNarrowband(pcm);
+        }
+        byte[] hembPkt = Adpcm.encodeHembParity(0, adpcmWin);
+        // Deliver frames 0, 2, 3 (drop frame 1) + HeMB parity frame directly into Hub B
+        hubB.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Pos 1", adpcmWin[0]));
+        hubB.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Pos 1", adpcmWin[2]));
+        hubB.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Pos 1", adpcmWin[3]));
+        hubB.onFrame(null, new Frame(Frame.AUDIO_HEMB, "Pos 1", hembPkt));
+
+        int audioCount = 0;
+        for (String ev : rB.log) {
+            if ("audio:Pos 1:640".equals(ev)) audioCount++;
+        }
+        assertEquals("HeMB must recover dropped frame #1 so all 4 voice frames play", 4, audioCount);
+
+        // Verify Sidelink live voice & PTT talk-state bridge across Hub tree
+        hubA.relayMeshTalkState("Pos Sidelink", true);
+        hubA.relayMeshAudio("Pos Sidelink", nb);
+        HubTest.waitFor(rB, "talk:Pos Sidelink:true");
+        HubTest.waitFor(rB, "audio:Pos Sidelink:640");
+
         hubB.stop();
         hubA.stop();
     }

@@ -40,6 +40,34 @@ final class Aware {
     static final String SERVICE_NAME = "growthinternal";
     private static final int TRANSPORT_WIFI_AWARE = 5;
     private static final String PASS = "GrowthInternalAware2026";
+    static final byte SIDELINK_MAGIC = (byte) 0xA5;
+    static final int MAX_SIDELINK_BYTES = 255;
+    static final int DEFAULT_SIDELINK_TTL = 15;
+    static final byte SIDELINK_AUDIO = 1;
+    static final byte SIDELINK_TALK = 2;
+    static final byte SIDELINK_TEXT = 3;
+    static final byte SIDELINK_ANNOUNCE = 4;
+    static final byte SIDELINK_PRESENCE = 5;
+
+    static final class SidelinkPacket {
+        final int msgId;
+        final int ttl;
+        final byte type;
+        final String sender;
+        final byte[] body;
+
+        SidelinkPacket(int msgId, int ttl, byte type, String sender, byte[] body) {
+            this.msgId = msgId & 0xFFFF;
+            this.ttl = ttl;
+            this.type = type;
+            this.sender = sender;
+            this.body = body;
+        }
+    }
+
+    interface SidelinkListener {
+        void onSidelink(SidelinkPacket packet);
+    }
 
     static final class Peer {
         final String name;
@@ -70,14 +98,24 @@ final class Aware {
 
     private final Context ctx;
     private final Listener listener;
+    private SidelinkListener sidelinkListener;
     private final ConnectivityManager cm;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final java.util.Random random = new java.util.Random();
     private final List<ConnectivityManager.NetworkCallback> netCallbacks =
             new ArrayList<ConnectivityManager.NetworkCallback>();
     private final java.util.Map<PeerHandle, Peer> pendingPeers =
             new java.util.concurrent.ConcurrentHashMap<PeerHandle, Peer>();
     private final java.util.Map<PeerHandle, Network> clientNets =
             new java.util.concurrent.ConcurrentHashMap<PeerHandle, Network>();
+    private final java.util.Map<PeerHandle, DiscoverySession> sidelinkPeers =
+            new java.util.concurrent.ConcurrentHashMap<PeerHandle, DiscoverySession>();
+    private final java.util.Map<Integer, Long> seenSidelinkIds =
+            new java.util.LinkedHashMap<Integer, Long>() {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<Integer, Long> eldest) {
+                    return size() > 256;
+                }
+            };
     private WifiAwareManager mgr;
     private WifiAwareSession awareSession;
     private PublishDiscoverySession publishSession;
@@ -99,6 +137,113 @@ final class Aware {
             } catch (RuntimeException ignored) {
             }
         }
+    }
+
+    Aware onSidelink(SidelinkListener sl) {
+        this.sidelinkListener = sl;
+        return this;
+    }
+
+    synchronized boolean recordSeenSidelink(int msgId) {
+        int id = msgId & 0xFFFF;
+        long now = System.currentTimeMillis();
+        Long prev = seenSidelinkIds.get(id);
+        seenSidelinkIds.put(id, now);
+        return prev == null || now - prev > 8000L;
+    }
+
+    static byte[] packSidelink(int msgId, int ttl, byte type, String sender, byte[] body) {
+        if (ttl <= 0 || sender == null || body == null) return null;
+        byte[] sBytes = sender.trim().getBytes(Hub.UTF8);
+        if (sBytes.length == 0) return null;
+        int sLen = Math.min(24, sBytes.length);
+        int hdr = 5 + sLen;
+        int bLen = Math.min(body.length, Math.max(0, MAX_SIDELINK_BYTES - hdr));
+        byte[] out = new byte[hdr + bLen];
+        out[0] = SIDELINK_MAGIC;
+        out[1] = (byte) (((type & 0x0F) << 4) | (Math.min(ttl, 15) & 0x0F));
+        out[2] = (byte) ((msgId >>> 8) & 0xFF);
+        out[3] = (byte) (msgId & 0xFF);
+        out[4] = (byte) sLen;
+        System.arraycopy(sBytes, 0, out, 5, sLen);
+        if (bLen > 0) System.arraycopy(body, 0, out, hdr, bLen);
+        return out;
+    }
+
+    static SidelinkPacket unpackSidelink(byte[] data) {
+        if (data == null || data.length < 6 || data[0] != SIDELINK_MAGIC) return null;
+        int typeAndTtl = data[1] & 0xFF;
+        byte type = (byte) ((typeAndTtl >>> 4) & 0x0F);
+        int ttl = typeAndTtl & 0x0F;
+        if (ttl <= 0 || type <= 0) return null;
+        int msgId = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
+        int sLen = data[4] & 0xFF;
+        if (sLen <= 0 || 5 + sLen > data.length) return null;
+        String sender = new String(data, 5, sLen, Hub.UTF8).trim();
+        if (sender.isEmpty()) return null;
+        int bLen = data.length - 5 - sLen;
+        byte[] body = new byte[bLen];
+        if (bLen > 0) System.arraycopy(data, 5 + sLen, body, 0, bLen);
+        return new SidelinkPacket(msgId, ttl, type, sender, body);
+    }
+
+    void broadcastSidelinkAudio(String sender, byte[] pcm) {
+        if (pcm == null || pcm.length < 4 || sidelinkPeers.isEmpty()) return;
+        broadcastSidelink(SIDELINK_AUDIO, sender, Adpcm.encodeNarrowband(pcm));
+    }
+
+    void broadcastSidelinkTalk(String sender, boolean talking) {
+        if (sidelinkPeers.isEmpty()) return;
+        broadcastSidelink(SIDELINK_TALK, sender, new byte[] { (byte) (talking ? 1 : 0) });
+    }
+
+    void broadcastSidelinkText(String sender, String text) {
+        if (text == null || text.isEmpty() || sidelinkPeers.isEmpty()) return;
+        broadcastSidelink(SIDELINK_TEXT, sender, Ble.compressText(text));
+    }
+
+    void broadcastSidelinkAnnounce(String sender, String text) {
+        if (text == null || text.isEmpty() || sidelinkPeers.isEmpty()) return;
+        broadcastSidelink(SIDELINK_ANNOUNCE, sender, Ble.compressText(text));
+    }
+
+    void broadcastSidelinkPresence(String sender, byte[] presence) {
+        if (presence == null || presence.length == 0 || sidelinkPeers.isEmpty()) return;
+        broadcastSidelink(SIDELINK_PRESENCE, sender, presence);
+    }
+
+    void broadcastSidelink(byte type, String sender, byte[] body) {
+        if (sender == null || body == null || sidelinkPeers.isEmpty()) return;
+        int msgId = (random.nextInt(0xFFFE) + 1) & 0xFFFF;
+        recordSeenSidelink(msgId);
+        byte[] raw = packSidelink(msgId, DEFAULT_SIDELINK_TTL, type, sender, body);
+        if (raw != null) sendRawToPeers(raw, null);
+    }
+
+    private void sendRawToPeers(byte[] raw, PeerHandle except) {
+        int id = ((raw[2] & 0xFF) << 8) | (raw[3] & 0xFF);
+        for (java.util.Map.Entry<PeerHandle, DiscoverySession> e : sidelinkPeers.entrySet()) {
+            PeerHandle h = e.getKey();
+            DiscoverySession s = e.getValue();
+            if (h == null || s == null || h.equals(except)) continue;
+            try {
+                s.sendMessage(h, id, raw);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
+    private boolean handleSidelinkMessage(DiscoverySession session, PeerHandle fromHandle, byte[] message) {
+        if (message == null || message.length < 6 || message[0] != SIDELINK_MAGIC) return false;
+        if (fromHandle != null && session != null) sidelinkPeers.put(fromHandle, session);
+        SidelinkPacket pkt = unpackSidelink(message);
+        if (pkt == null || !recordSeenSidelink(pkt.msgId)) return true;
+        if (sidelinkListener != null) sidelinkListener.onSidelink(pkt);
+        if (pkt.ttl > 1) {
+            byte[] relayed = packSidelink(pkt.msgId, pkt.ttl - 1, pkt.type, pkt.sender, pkt.body);
+            if (relayed != null) sendRawToPeers(relayed, fromHandle);
+        }
+        return true;
     }
 
     static boolean isSupported(Context c) {
@@ -181,8 +326,10 @@ final class Aware {
                 }
                 @Override public void onMessageReceived(PeerHandle peerHandle, byte[] message) {
                     if (message == null || publishSession == null) return;
+                    if (handleSidelinkMessage(publishSession, peerHandle, message)) return;
                     String s = new String(message, Hub.UTF8);
                     if ("JOIN".equals(s)) {
+                        if (peerHandle != null) sidelinkPeers.put(peerHandle, publishSession);
                         if (listener != null) listener.onResponderRequested();
                         openDataPath(publishSession, peerHandle, false, null);
                     }
@@ -199,6 +346,7 @@ final class Aware {
                 @Override public void onServiceDiscovered(PeerHandle peerHandle,
                         byte[] serviceSpecificInfo, List<byte[]> matchFilter) {
                     if (serviceSpecificInfo == null || subscribeSession == null) return;
+                    if (peerHandle != null) sidelinkPeers.put(peerHandle, subscribeSession);
                     Lan.Peer lp = Lan.decodePacket(serviceSpecificInfo, serviceSpecificInfo.length, null);
                     if (lp != null && listener != null) {
                         listener.onPeer(new Peer(lp.name, lp.port, lp.inGroup, lp.memberCount,
@@ -207,6 +355,7 @@ final class Aware {
                 }
                 @Override public void onMessageReceived(PeerHandle peerHandle, byte[] message) {
                     if (message == null || peerHandle == null) return;
+                    if (handleSidelinkMessage(subscribeSession, peerHandle, message)) return;
                     String s = new String(message, Hub.UTF8);
                     if (s.startsWith("IPV6:")) {
                         String host = s.substring(5).trim();
@@ -328,6 +477,7 @@ final class Aware {
     void stop() {
         pendingPeers.clear();
         clientNets.clear();
+        sidelinkPeers.clear();
         synchronized (netCallbacks) {
             for (ConnectivityManager.NetworkCallback cb : netCallbacks) {
                 try { cm.unregisterNetworkCallback(cb); } catch (RuntimeException ignored) {}

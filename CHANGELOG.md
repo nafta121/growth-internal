@@ -2,6 +2,22 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.23.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Sinergi Panggilan Suara & Push-to-Talk Multi-Hop Kilometer: ProSe Wi‑Fi Aware L2 Sidelink + 3GPP Rel-13 Relay + 15-Hop Mesh + MeshSat HeMB/SMAZ2)
+- **Tahap 1 — *Adaptive 3-Tier Voice Codec, MeshSat HeMB $\text{GF}(2^8)$ RLNC Voice FEC, & 3GPP MCPTT Priority Floor Preemption* (`Adpcm`, `Frame`, `Link`, `Hub`)**:
+  - Menambahkan mode kompresi suara **8:1 Narrowband 8 kHz IMA ADPCM (`84 byte` per 20 ms = `32 kbps`, hemat bandwidth 87.5%)** (`Adpcm.encodeNarrowband`) dengan *linear upsampling* otomatis kembali ke 16 kHz PCM di `Adpcm.decode`, serta pemilihan adaptif 3-tingkat di `Link` (`lowBandwidth && relay` memakai 84 byte narrowband; `lowBandwidth || relay` memakai 164 byte wideband).
+  - Mengimplementasikan **MeshSat HeMB $\text{GF}(2^8)$ Sliding-Window RLNC Voice FEC** (`Adpcm.gfMul`, `Adpcm.gfInv`, `Adpcm.encodeHembParity`, `Adpcm.recoverHembFrame`, dan `Frame.AUDIO_HEMB = 20`) untuk merekonstruksi bingkai suara yang hilang di udara dalam **`0 ms`** tanpa *retransmit*.
+  - Mengadopsi **3GPP MCPTT Priority Floor Preemption** (`Frame.priority` & `Hub.isPrioritySpeaker`): suara dari anggota berstatus Prioritas/SOS ditempatkan langsung ke antrean tertinggi (`vital`) di setiap hop sehingga tidak pernah tertahan oleh trafik biasa.
+- **Tahap 2 — *ProSe-Style Wi‑Fi Aware L2 Sidelink Multi-Hop Voice & PTT Relay* (`Aware`, `Hub`, `MainActivity`)**:
+  - Menambahkan jalur *Connectionless L2 Action Frame Sidelink* (`Aware.SIDELINK_MAGIC = 0xA5`, batas `< 255 byte`, `DEFAULT_SIDELINK_TTL = 15`) di atas `DiscoverySession.sendMessage()` untuk meneruskan bingkai suara 84 byte (`SIDELINK_AUDIO`), status bicara PTT (`SIDELINK_TALK`), Chat (`SIDELINK_TEXT`), Instruksi (`SIDELINK_ANNOUNCE`), dan Status/SOS (`SIDELINK_PRESENCE`) secara instan (`0 ms` tanpa menunggu pembentukan pipa IPv6 NDP) sekaligus menjembatani suara dan status PTT lintas transport ke pohon `Hub`.
+- **Tahap 3 — *Extended 15-Hop Kilometer Mesh, `SMAZ2` Dictionary Compression, & 3GPP Rel-12/13 ProSe Support* (`Ble`, `Lan`, `MeshCoordinator`)**:
+  - Meningkatkan batas hop *BLE Flood Mesh* (`0xFD92`) menjadi **`DEFAULT_TTL = 15` hop** untuk jangkauan estafet berkilometer.
+  - Menambahkan kompresi kamus bahasa Indonesia & operasional lapangan ala **MeshSat `SMAZ2`** (`Ble.compressText` & `Ble.decompressText`) sehingga pesan lapangan panjang termampatkan 35–50% sebelum dipotong ke dalam fragmen mikro BLE maupun dikirim lewat L2 Sidelink.
+  - Menambahkan deteksi antarmuka **3GPP ProSe/PC5 Sidelink** (`Lan.isProSeSidelinkInterface`), detektor *Receive-Deafness* satu arah (`MeshCoordinator.isReceiveDeaf`), serta pemilihan *UE-to-Network Gateway Peer* (`MeshCoordinator.selectBestGatewayPeer`).
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan pengujian unit `proseAwareSidelinkHembVoiceSmaz2And15HopKilometerMesh` yang memverifikasi seluruh fitur Tahap 1–3 secara menyeluruh.
+
 ## [0.22.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Sinergi Multi-Hop & Multi-Device Spectre + FISSURE + BlueRange)

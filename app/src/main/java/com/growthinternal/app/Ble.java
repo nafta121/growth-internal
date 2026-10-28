@@ -44,7 +44,7 @@ final class Ble {
     static final byte MESH_PRESENCE = 1;
     static final byte MESH_TEXT = 2;
     static final byte MESH_ANNOUNCE = 3;
-    static final int DEFAULT_TTL = 5;
+    static final int DEFAULT_TTL = 15;
 
     private static final int HEADER_LEN = 10;
     private static final int HEADER_PSM_LEN = 12;
@@ -52,9 +52,20 @@ final class Ble {
     private static final int MAX_MESH_SENDER = 8;
     private static final int MAX_MESH_TOTAL = 22;
     private static final int MAX_SEEN_IDS = 256;
+    static final byte SMAZ_MAGIC = (byte) 0x1E;
     static final byte FRAG_MAGIC = (byte) 0x1F;
     static final int MAX_FRAG_PARTS = 7;
     static final int MAX_FRAG_TEXT_BYTES = 56;
+    private static final String[] SMAZ_DICT = {
+        "Rotasi ", "rotasi ", "dimulai ", "menit ", "menuju ", "Main Hall", "Pos ", "pos ",
+        "Aman", "aman", "Tim ", "tim ", "Butuh ", "butuh ", "medis ", "bantuan ",
+        "segera", "darurat", "jalur ", "evakuasi", "sektor ", "lokasi ", "baterai ", "siap ",
+        "lagi ", "dari ", "untuk ", "dengan ", "sudah ", "belum ", "tidak ", "ada ",
+        "di ", "ke ", "dan ", "yang ", "ini ", "itu ", "10 ", "15 ",
+        "an", "ar", "at", "en", "er", "in", "it", "ka",
+        "ke", "la", "ma", "me", "ng", "ny", "pa", "pe",
+        "ra", "re", "sa", "se", "ta", "te", "ti", "tu"
+    };
     private static final int MAX_MESH_QUEUE = 16;
     private static final long MESH_ADV_WINDOW_MS = 450L;
 
@@ -461,10 +472,88 @@ final class Ble {
         advertising = false;
     }
 
+    /**
+     * MeshSat SMAZ2-inspired dictionary compression for short field messages (< 1 ms).
+     * Emits SMAZ_MAGIC (0x1E) prefix only when compressed bytes are strictly shorter than UTF-8.
+     */
+    static byte[] compressText(String text) {
+        if (text == null || text.isEmpty()) return new byte[0];
+        String trimmed = text.trim();
+        byte[] raw = trimmed.getBytes(Hub.UTF8);
+        if (raw.length <= 4) return raw;
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(raw.length);
+        bos.write(SMAZ_MAGIC);
+        int i = 0;
+        while (i < raw.length) {
+            int matchedIdx = -1;
+            int matchedLen = 0;
+            for (int d = 0; d < SMAZ_DICT.length; d++) {
+                String entry = SMAZ_DICT[d];
+                int eLen = entry.length();
+                if (eLen > matchedLen && i + eLen <= raw.length) {
+                    boolean ok = true;
+                    for (int k = 0; k < eLen; k++) {
+                        if (raw[i + k] != (byte) entry.charAt(k)) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if (ok) {
+                        matchedIdx = d;
+                        matchedLen = eLen;
+                    }
+                }
+            }
+            if (matchedIdx >= 0) {
+                bos.write(0x80 | matchedIdx);
+                i += matchedLen;
+            } else {
+                int b = raw[i++] & 0xFF;
+                if (b >= 0x80 || b == (SMAZ_MAGIC & 0xFF) || b == (FRAG_MAGIC & 0xFF)) {
+                    bos.write(0xFF);
+                }
+                bos.write(b);
+            }
+        }
+        byte[] comp = bos.toByteArray();
+        return comp.length < raw.length ? comp : raw;
+    }
+
+    static String decompressText(byte[] data) {
+        if (data == null || data.length == 0) return "";
+        if (data[0] != SMAZ_MAGIC) return new String(data, Hub.UTF8);
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(data.length * 2);
+        int i = 1;
+        while (i < data.length) {
+            int b = data[i++] & 0xFF;
+            if (b == 0xFF) {
+                if (i < data.length) bos.write(data[i++] & 0xFF);
+            } else if ((b & 0x80) != 0) {
+                int idx = b & 0x7F;
+                if (idx < SMAZ_DICT.length) {
+                    String entry = SMAZ_DICT[idx];
+                    for (int k = 0; k < entry.length(); k++) bos.write(entry.charAt(k));
+                }
+            } else {
+                bos.write(b);
+            }
+        }
+        return new String(bos.toByteArray(), Hub.UTF8);
+    }
+
     static List<byte[]> splitMeshText(String text, int groupId) {
-        byte[] full = trimUtf8(text, MAX_FRAG_TEXT_BYTES);
+        String trimmed = text != null ? text.trim() : "";
+        byte[] utf8 = trimmed.getBytes(Hub.UTF8);
         List<byte[]> out = new ArrayList<byte[]>();
-        if (full.length == 0) return out;
+        if (utf8.length == 0) return out;
+        if (utf8.length <= 10) {
+            out.add(utf8);
+            return out;
+        }
+        byte[] full = compressText(trimmed);
+        if (full.length > MAX_FRAG_TEXT_BYTES) {
+            full = trimUtf8(trimmed, MAX_FRAG_TEXT_BYTES);
+        }
         if (full.length <= 10) {
             out.add(full);
             return out;
@@ -485,7 +574,12 @@ final class Ble {
     }
 
     synchronized byte[] reassembleMeshBody(String sender, byte type, byte[] body) {
-        if (body == null || body.length < 2 || body[0] != FRAG_MAGIC) return body;
+        if (body == null || body.length < 2 || body[0] != FRAG_MAGIC) {
+            if (body != null && body.length > 0 && body[0] == SMAZ_MAGIC) {
+                return decompressText(body).getBytes(Hub.UTF8);
+            }
+            return body;
+        }
         if (body.length == 2) return null;
         int meta = body[1] & 0xFF;
         int gid = (meta >>> 6) & 0x03;
@@ -511,6 +605,9 @@ final class Ble {
         for (byte[] p : slot.parts) {
             System.arraycopy(p, 0, assembled, pos, p.length);
             pos += p.length;
+        }
+        if (assembled.length > 0 && assembled[0] == SMAZ_MAGIC) {
+            return decompressText(assembled).getBytes(Hub.UTF8);
         }
         return assembled;
     }

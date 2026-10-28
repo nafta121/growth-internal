@@ -254,6 +254,20 @@ public class MainActivity extends Activity implements Hub.Callback {
                     @Override public void run() { onAwareTargetReady(peerName, address, port); }
                 });
             }
+        }).onSidelink(new Aware.SidelinkListener() {
+            @Override public void onSidelink(final Aware.SidelinkPacket packet) {
+                if (packet != null && packet.type == Aware.SIDELINK_AUDIO) {
+                    if (!packet.sender.equals(myName)) {
+                        byte[] pcm = Adpcm.decode(packet.body);
+                        if (pcm.length > 0) voice.play(packet.sender, pcm);
+                        if (hub != null && hub.hasPeers()) hub.relayMeshAudio(packet.sender, packet.body);
+                    }
+                    return;
+                }
+                ui.post(new Runnable() {
+                    @Override public void run() { onAwareSidelink(packet); }
+                });
+            }
         });
         lan = new Lan(new Lan.Listener() {
             @Override public void onPeer(final Lan.Peer peer) {
@@ -1533,6 +1547,9 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
         if (aware != null && neededPermissions().length == 0) {
             aware.updatePublish(myName, port, ownerActive, count, cid);
+            if (p.status == Presence.SOS) {
+                aware.broadcastSidelinkPresence(myName, p.encode());
+            }
         }
         if (lan != null) {
             lan.announce(myName, port, ownerActive, count, cid);
@@ -1672,6 +1689,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                         if (t.length() > 1000) t = t.substring(0, 1000);
                         hub.sendAnnouncement(t);
                         if (ble != null) ble.broadcastMeshAnnounce(myName, t);
+                        if (aware != null) aware.broadcastSidelinkAnnounce(myName, t);
                         addAnnouncement("Kamu", t);
                     }
                 })
@@ -2625,6 +2643,42 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
     }
 
+    private void onAwareSidelink(Aware.SidelinkPacket pkt) {
+        if (pkt == null || pkt.sender.equals(myName)) return;
+        if (pkt.type == Aware.SIDELINK_TALK) {
+            boolean talking = pkt.body != null && pkt.body.length > 0 && pkt.body[0] != 0;
+            updateMeshPeerState(pkt.sender, presences.get(pkt.sender), true);
+            if (hub != null && hub.hasPeers()) hub.relayMeshTalkState(pkt.sender, talking);
+            onTalkState(pkt.sender, talking);
+        } else if (pkt.type == Aware.SIDELINK_TEXT) {
+            String text = Ble.decompressText(pkt.body).trim();
+            if (!text.isEmpty() && shouldAcceptMeshText(pkt.sender, text)) {
+                updateMeshPeerState(pkt.sender, presences.get(pkt.sender), true);
+                if (hub != null && hub.hasPeers()) hub.relayMeshText(pkt.sender, text);
+                if (ble != null) ble.broadcastMeshText(pkt.sender, text);
+                addBubble(pkt.sender, text, false);
+                notifyAway(Alerts.CH_MESSAGES, pkt.sender, text);
+            }
+        } else if (pkt.type == Aware.SIDELINK_ANNOUNCE) {
+            String text = Ble.decompressText(pkt.body).trim();
+            if (!text.isEmpty() && shouldAcceptMeshText("ann:" + pkt.sender, text)) {
+                updateMeshPeerState(pkt.sender, presences.get(pkt.sender), true);
+                if (hub != null && hub.hasPeers()) hub.relayMeshAnnounce(pkt.sender, text);
+                if (ble != null) ble.broadcastMeshAnnounce(pkt.sender, text);
+                addAnnouncement(pkt.sender, text);
+                notifyAway(Alerts.CH_MESSAGES, "Instruksi dari " + pkt.sender, text);
+                vibrate(new long[] {0, 400});
+                beep(AudioManager.STREAM_NOTIFICATION, ToneGenerator.TONE_PROP_ACK, 400);
+            }
+        } else if (pkt.type == Aware.SIDELINK_PRESENCE) {
+            Presence p = Presence.decode(pkt.body);
+            if (p != null) {
+                updateMeshPeerState(pkt.sender, p, true);
+                if (hub != null && hub.hasPeers()) hub.relayMeshPresence(pkt.sender, pkt.body);
+            }
+        }
+    }
+
     private void onBleMesh(Ble.MeshPacket pkt) {
         if (pkt == null || pkt.sender.equals(myName)) return;
         if (pkt.type == Ble.MESH_PRESENCE) {
@@ -3103,6 +3157,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (t.length() > 2000) t = t.substring(0, 2000);
         hub.sendText(t);
         if (ble != null) ble.broadcastMeshText(myName, t);
+        if (aware != null) aware.broadcastSidelinkText(myName, t);
         addBubble(myName, t, true);
         input.setText("");
     }
@@ -3117,13 +3172,17 @@ public class MainActivity extends Activity implements Hub.Callback {
         final Hub h = hub;
         try {
             voice.startCapture(new Voice.Sink() {
-                @Override public void onPcm(byte[] pcm) { h.sendAudio(pcm); }
+                @Override public void onPcm(byte[] pcm) {
+                    h.sendAudio(pcm);
+                    if (aware != null) aware.broadcastSidelinkAudio(myName, pcm);
+                }
             });
         } catch (RuntimeException e) {
             toast(e.getMessage());
             return;
         }
         h.sendTalkState(true);
+        if (aware != null) aware.broadcastSidelinkTalk(myName, true);
         refreshControls();
     }
 
@@ -3131,6 +3190,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (voice.isCapturing()) {
             voice.stopCapture();
             if (hub != null) hub.sendTalkState(false);
+            if (aware != null) aware.broadcastSidelinkTalk(myName, false);
         }
         refreshControls();
     }

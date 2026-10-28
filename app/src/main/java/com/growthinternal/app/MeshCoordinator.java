@@ -12,6 +12,7 @@ import java.util.Map;
 final class MeshCoordinator {
     static final long AUTO_COOLDOWN_MS = 12000L;
     static final long DISCONNECT_PAUSE_MS = 15000L;
+    static final long DEAF_TIMEOUT_MS = 12000L;
     private static final long DEDUP_WINDOW_MS = 10000L;
     private static final long STATS_TTL_MS = 30000L;
 
@@ -71,6 +72,7 @@ final class MeshCoordinator {
             return size() > 128;
         }
     };
+    private final Map<String, Boolean> gatewayPeers = new LinkedHashMap<String, Boolean>();
     private long autoConnectPauseUntil;
     private Hub relayHub;
 
@@ -145,6 +147,43 @@ final class MeshCoordinator {
                 && st.lastRssi >= MIN_COHERENT_RSSI
                 && st.lastRssi <= Ble.MIN_AUTO_RSSI
                 && st.emaDrift <= HANDOVER_DRIFT_DB;
+    }
+
+    /**
+     * MeshSat Receive-Deafness detector: returns true when we are transmitting to a peer
+     * (lastTxMs > lastSeenMs) and have received zero inbound frames/beacons for > DEAF_TIMEOUT_MS.
+     */
+    boolean isReceiveDeaf(String peerName, long lastTxMs, long nowMs) {
+        if (peerName == null || lastTxMs <= 0) return false;
+        LinkStats st = peerStats.get(peerName);
+        if (st == null || st.lastSeenMs <= 0) return false;
+        return lastTxMs > st.lastSeenMs && (nowMs - st.lastSeenMs) >= DEAF_TIMEOUT_MS;
+    }
+
+    /**
+     * 3GPP Rel-13 ProSe UE-to-Network Relay: records whether a mesh peer has external
+     * cellular/network reachability and selects the most coherent gateway peer.
+     */
+    void recordGatewayPeer(String peerName, boolean hasExternalNetwork) {
+        if (peerName == null) return;
+        if (hasExternalNetwork) gatewayPeers.put(peerName, Boolean.TRUE);
+        else gatewayPeers.remove(peerName);
+    }
+
+    String selectBestGatewayPeer() {
+        String best = null;
+        double bestScore = -1.0;
+        for (String name : gatewayPeers.keySet()) {
+            LinkStats st = peerStats.get(name);
+            double score = (st != null && st.count > 0)
+                    ? (st.mean + 100.0) / (1.0 + st.stdDev() * 0.25)
+                    : 1.0;
+            if (score > bestScore) {
+                bestScore = score;
+                best = name;
+            }
+        }
+        return best;
     }
 
     boolean canAutoConnect(String key, String peerName, String myName, Hub activeHub) {

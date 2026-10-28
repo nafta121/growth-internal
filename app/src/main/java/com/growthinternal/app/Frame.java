@@ -21,13 +21,15 @@ final class Frame {
     static final byte CLUSTER_UPDATE = 17; // BlueRange CLUSTER_INFO_UPDATE: 16-bit clusterId + 16-bit clusterSize
     static final byte IMAGE_CHUNK = 18; // FISSURE/BlueRange 8 KB chunked image transfer (non-blocking)
     static final byte MESH_RELAY = 19;  // Cross-transport BLE <-> Hub multi-hop relay envelope
+    static final byte AUDIO_HEMB = 20;  // MeshSat HeMB GF(2^8) RLNC voice parity frame
 
     /** Largest payload accepted per type, so a bad peer cannot exhaust memory. */
     static int maxPayload(byte type) {
         switch (type) {
             case HELLO: return 64 * 1024; // name + small JPEG avatar
             case AUDIO: return 8 * 1024;
-            case AUDIO_ADPCM: return 2 * 1024;
+            case AUDIO_ADPCM:
+            case AUDIO_HEMB: return 2 * 1024;
             case VOICE_NOTE: return 48 * 1024;
             case TEXT:
             case ANNOUNCE:
@@ -47,15 +49,25 @@ final class Frame {
     final String sender;
     final byte[] payload;
     final long createdMs;
+    final boolean priority;
 
     Frame(byte type, String sender, byte[] payload) {
-        this(type, sender, payload, System.currentTimeMillis());
+        this(type, sender, payload, System.currentTimeMillis(), false);
+    }
+
+    Frame(byte type, String sender, byte[] payload, boolean priority) {
+        this(type, sender, payload, System.currentTimeMillis(), priority);
     }
 
     Frame(byte type, String sender, byte[] payload, long createdMs) {
+        this(type, sender, payload, createdMs, false);
+    }
+
+    Frame(byte type, String sender, byte[] payload, long createdMs, boolean priority) {
         this.type = type;
         this.sender = sender;
         this.payload = payload == null ? new byte[0] : payload;
         this.createdMs = createdMs;
+        this.priority = priority;
     }
 }

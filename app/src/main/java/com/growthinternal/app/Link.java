@@ -83,11 +83,20 @@ final class Link {
     void send(Frame f) {
         if (closed) return;
         // Drop audio rather than build up delay when the radio link is slow.
-        if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM) {
-            if (queue.size() > MAX_QUEUED_AUDIO) return;
+        if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM || f.type == Frame.AUDIO_HEMB) {
+            if (!f.priority && queue.size() > MAX_QUEUED_AUDIO) return;
+            if (f.priority && vital.size() > MAX_QUEUED_AUDIO) return;
             if (System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) return;
             if ((lowBandwidth || relay) && f.type == Frame.AUDIO && f.payload.length >= 4) {
-                f = new Frame(Frame.AUDIO_ADPCM, f.sender, Adpcm.encode(f.payload), f.createdMs);
+                byte[] enc = (lowBandwidth && relay)
+                        ? Adpcm.encodeNarrowband(f.payload)
+                        : Adpcm.encode(f.payload);
+                f = new Frame(Frame.AUDIO_ADPCM, f.sender, enc, f.createdMs, f.priority);
+            }
+            if (f.priority) {
+                vital.offer(f);
+                if (queue.isEmpty()) queue.offer(WAKE);
+                return;
             }
         }
         if (f.type == Frame.IMAGE || f.type == Frame.IMAGE_CHUNK
@@ -95,7 +104,7 @@ final class Link {
             if (lowBandwidth && bulk.size() >= MAX_LOW_BW_BULK) return;
             bulk.offer(f);
             if (queue.isEmpty()) queue.offer(WAKE);
-        } else if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM
+        } else if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM || f.type == Frame.AUDIO_HEMB
                 || f.type == Frame.TEXT || f.type == Frame.ANNOUNCE) {
             queue.offer(f);
         } else {
@@ -123,7 +132,7 @@ final class Link {
                     }
                 }
                 if (f == null) f = new Frame(Frame.PING, "", null);
-                if ((f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM)
+                if ((f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM || f.type == Frame.AUDIO_HEMB)
                         && System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) {
                     continue;
                 }

@@ -20,7 +20,7 @@
 
 Saat kegiatan **Outbound, Experiential Learning, dan Corporate Training** berlangsung di area perkemahan, pegunungan, resort, atau *venue* luar ruang, sinyal seluler dan kuota internet sering kali tidak stabil atau hilang. **Growth Internal** menghubungkan HP Tim secara langsung lewat radio Wi‑Fi di dalam HP (Wi‑Fi Direct). Tidak butuh kartu SIM, router, server, atau Google Play Services. Seluruh Tim Fasilitator, PIC, Basecamp, dan Logistik tetap bisa berkomunikasi, memantau kesiapan pos, mengoordinasikan rotasi, serta mengirim panggilan prioritas.
 
-> **Status:** v0.20.0. Seluruh fitur komunikasi lapangan multi-transport (*Wi‑Fi Aware, Hotspot/LAN, Wi‑Fi Direct, Bluetooth L2CAP/RFCOMM, BLE Mesh, dan BlueRange MeshAccess Zero-Action Relay*), auto-update internal dari GitHub Releases, peta offline, kompas, dan protokol *mesh* telah teruji otomatis.
+> **Status:** v0.23.0. Seluruh fitur komunikasi lapangan multi-transport (*Wi‑Fi Aware L2 Sidelink & NDP, Hotspot/LAN, Wi‑Fi Direct, Bluetooth L2CAP/RFCOMM, Extended 15-Hop BLE Mesh dengan kompresi SMAZ2, BlueRange MeshAccess Zero-Action Relay, serta Panggilan Suara & Push-to-Talk Multi-Hop Kilometer dengan MeshSat HeMB GF(2^8) Voice FEC & 3GPP MCPTT Priority*), auto-update internal dari GitHub Releases, peta offline, kompas, dan protokol *mesh* telah teruji otomatis.
 
 ## Tampilan
 

@@ -78,6 +78,12 @@ final class Hub implements Link.Listener {
             return size() > 128;
         }
     };
+    private static final int[] STREAM_HEMB_COEFFS = { 1, 1, 1, 1 };
+    private final byte[][] txHembWindow = new byte[Adpcm.HEMB_WINDOW][];
+    private int txHembCount;
+    private int txHembSeq;
+    private final Map<String, byte[][]> rxHembWindows = new LinkedHashMap<String, byte[][]>();
+    private final Map<String, Integer> rxHembCounts = new LinkedHashMap<String, Integer>();
     private volatile byte[] myPresence;
     private final String myName;
     private final byte[] myPhoto;
@@ -355,11 +361,29 @@ final class Hub implements Link.Listener {
         relayMeshPacket(Frame.PRESENCE, originSender, presence);
     }
 
+    void relayMeshAudio(String originSender, byte[] adpcm) {
+        if (adpcm == null || adpcm.length == 0) return;
+        relayMeshPacket(Frame.AUDIO_ADPCM, originSender, adpcm);
+    }
+
+    void relayMeshTalkState(String originSender, boolean talking) {
+        relayMeshPacket(talking ? Frame.TALK_START : Frame.TALK_END, originSender, new byte[] { (byte) (talking ? 1 : 0) });
+    }
+
     void relayMeshPacket(byte innerType, String originSender, byte[] innerPayload) {
         if (originSender == null || originSender.equals(myName) || links.isEmpty()) return;
         byte[] env = encodeMeshRelay(innerType, originSender, innerPayload);
         if (env == null || !recordSeenRelay(env)) return;
         broadcast(new Frame(Frame.MESH_RELAY, myName, env), null);
+    }
+
+    boolean isPrioritySpeaker(String sender) {
+        if (sender == null) return false;
+        byte[] p = sender.equals(myName) ? myPresence : null;
+        if (p == null) {
+            synchronized (presences) { p = presences.get(sender); }
+        }
+        return p != null && p.length >= 2 && p[1] == Presence.SOS;
     }
 
     void sendPresence(byte[] presence) {
@@ -401,10 +425,26 @@ final class Hub implements Link.Listener {
     }
 
     void sendAudio(byte[] pcm) {
-        broadcast(new Frame(Frame.AUDIO, myName, pcm), null);
+        boolean prio = isPrioritySpeaker(myName);
+        broadcast(new Frame(Frame.AUDIO, myName, pcm, prio), null);
+        if (pcm != null && pcm.length == Voice.FRAME_BYTES) {
+            byte[] parity = null;
+            synchronized (txHembWindow) {
+                txHembWindow[txHembCount++] = Adpcm.encodeNarrowband(pcm);
+                if (txHembCount == Adpcm.HEMB_WINDOW) {
+                    parity = Adpcm.encodeHembParity(txHembSeq, txHembWindow, STREAM_HEMB_COEFFS);
+                    txHembSeq = (txHembSeq + Adpcm.HEMB_WINDOW) & 0xFFFF;
+                    txHembCount = 0;
+                }
+            }
+            if (parity != null) {
+                broadcast(new Frame(Frame.AUDIO_HEMB, myName, parity, prio), null);
+            }
+        }
     }
 
     void sendTalkState(boolean talking) {
+        synchronized (txHembWindow) { txHembCount = 0; }
         broadcast(new Frame(talking ? Frame.TALK_START : Frame.TALK_END, myName, null), null);
     }
 
@@ -539,7 +579,7 @@ final class Hub implements Link.Listener {
         // A sender belongs to the link it joined through: a plain member only speaks for
         // itself, a bridge/relay for the phones behind it. This stops one member from posing
         // as another (fake SOS or announcements) and prevents mesh loops.
-        if (!from.behind.contains(f.sender)) return;
+        if (from != null && !from.behind.contains(f.sender)) return;
         if (f.type == Frame.MESH_RELAY) {
             if (!recordSeenRelay(f.payload)) return;
             if (owner || links.size() > 1) {
@@ -548,10 +588,26 @@ final class Hub implements Link.Listener {
             handleMeshRelay(f.payload);
             return;
         }
+        byte[] hembFrame = null;
         if (f.type == Frame.AUDIO_ADPCM) {
-            f = new Frame(Frame.AUDIO, f.sender, Adpcm.decode(f.payload));
+            byte[] rawAdpcm = f.payload;
+            byte[] decodedPcm = Adpcm.decode(rawAdpcm);
+            if (rawAdpcm != null && rawAdpcm.length == 84) {
+                hembFrame = rawAdpcm;
+            } else if (decodedPcm.length == Voice.FRAME_BYTES) {
+                hembFrame = Adpcm.encodeNarrowband(decodedPcm);
+            }
+            f = new Frame(Frame.AUDIO, f.sender, decodedPcm,
+                    f.createdMs, isPrioritySpeaker(f.sender));
+        } else if (f.type == Frame.AUDIO && f.payload != null && f.payload.length == Voice.FRAME_BYTES) {
+            hembFrame = Adpcm.encodeNarrowband(f.payload);
+            if (isPrioritySpeaker(f.sender) && !f.priority) {
+                f = new Frame(f.type, f.sender, f.payload, f.createdMs, true);
+            }
+        } else if (f.type == Frame.AUDIO_HEMB && isPrioritySpeaker(f.sender) && !f.priority) {
+            f = new Frame(f.type, f.sender, f.payload, f.createdMs, true);
         }
-        if (f.type == Frame.LEAVE) from.behind.remove(f.sender);
+        if (f.type == Frame.LEAVE && from != null) from.behind.remove(f.sender);
         if (owner || links.size() > 1) {
             broadcast(f, from);
         }
@@ -561,12 +617,44 @@ final class Hub implements Link.Listener {
                 cb.onText(f.sender, new String(f.payload, UTF8));
                 break;
             case Frame.AUDIO:
+                if (hembFrame != null) {
+                    synchronized (rxHembWindows) {
+                        byte[][] win = rxHembWindows.get(f.sender);
+                        if (win == null) {
+                            win = new byte[Adpcm.HEMB_WINDOW][];
+                            rxHembWindows.put(f.sender, win);
+                        }
+                        Integer cntObj = rxHembCounts.get(f.sender);
+                        int cnt = cntObj != null ? cntObj : 0;
+                        if (cnt >= Adpcm.HEMB_WINDOW) cnt = 0;
+                        win[cnt] = hembFrame;
+                        rxHembCounts.put(f.sender, cnt + 1);
+                    }
+                }
                 cb.onAudio(f.sender, f.payload);
                 break;
+            case Frame.AUDIO_HEMB:
+                byte[] recoveredPcm = null;
+                synchronized (rxHembWindows) {
+                    byte[][] win = rxHembWindows.get(f.sender);
+                    Integer cntObj = rxHembCounts.remove(f.sender);
+                    int cnt = cntObj != null ? cntObj : 0;
+                    if (win != null && cnt == Adpcm.HEMB_WINDOW - 1) {
+                        win[Adpcm.HEMB_WINDOW - 1] = null;
+                        byte[] recAdpcm = Adpcm.recoverHembFrame(win, Adpcm.HEMB_WINDOW - 1, f.payload);
+                        if (recAdpcm != null) recoveredPcm = Adpcm.decode(recAdpcm);
+                    }
+                }
+                if (recoveredPcm != null && recoveredPcm.length > 0) {
+                    cb.onAudio(f.sender, recoveredPcm);
+                }
+                break;
             case Frame.TALK_START:
+                synchronized (rxHembWindows) { rxHembCounts.remove(f.sender); }
                 cb.onTalkState(f.sender, true);
                 break;
             case Frame.TALK_END:
+                synchronized (rxHembWindows) { rxHembCounts.remove(f.sender); }
                 cb.onTalkState(f.sender, false);
                 break;
             case Frame.PRESENCE:
@@ -618,6 +706,16 @@ final class Hub implements Link.Listener {
                 break;
             case Frame.PRESENCE:
                 cb.onPresence(originSender, innerPayload);
+                break;
+            case Frame.AUDIO_ADPCM:
+                byte[] pcm = Adpcm.decode(innerPayload);
+                if (pcm.length > 0) cb.onAudio(originSender, pcm);
+                break;
+            case Frame.TALK_START:
+                cb.onTalkState(originSender, true);
+                break;
+            case Frame.TALK_END:
+                cb.onTalkState(originSender, false);
                 break;
             default:
                 break;
@@ -690,6 +788,10 @@ final class Hub implements Link.Listener {
         boolean had;
         synchronized (members) { had = members.remove(name) != null; }
         synchronized (presences) { presences.remove(name); }
+        synchronized (rxHembWindows) {
+            rxHembWindows.remove(name);
+            rxHembCounts.remove(name);
+        }
         clips.drop(name);
         images.drop(name);
         if (had) {
