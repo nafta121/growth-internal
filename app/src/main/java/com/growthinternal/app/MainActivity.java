@@ -148,6 +148,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     private boolean visible;
     private SensorManager sensors;
     private SensorEventListener headingListener;
+    private SensorEventListener proximityListener;
+    private boolean nearEar;
+    private final ApkShare apkShare = new ApkShare();
     private float heading;
     private RadarView radar;
     private View compassPage;
@@ -361,7 +364,9 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     @Override protected void onDestroy() {
         stopHeading();
+        stopProximity();
         stopAlarm();
+        apkShare.stop();
         ui.removeCallbacks(presenceTick);
         if (locations != null && locationListener != null) locations.removeUpdates(locationListener);
         if (receiver != null) unregisterReceiver(receiver);
@@ -1080,16 +1085,108 @@ public class MainActivity extends Activity implements Hub.Callback {
                 .setTitle("Kirim ke grup")
                 .setItems(new String[] {"Ambil foto dengan kamera",
                                 "Rekam video (maks. " + VIDEO_SECONDS + " detik)",
+                                "Rekam pesan suara (Voice Note maks. 10 detik)",
                                 "Pilih foto dari galeri", "Pilih video dari galeri"},
                         new DialogInterface.OnClickListener() {
                             @Override public void onClick(DialogInterface d, int which) {
                                 if (which == 0) takePhoto();
                                 else if (which == 1) recordVideo();
-                                else if (which == 2) pickPhotoToSend();
+                                else if (which == 2) recordVoiceNote();
+                                else if (which == 3) pickPhotoToSend();
                                 else pickVideoToSend();
                             }
                         })
                 .show();
+    }
+
+    private void recordVoiceNote() {
+        if (!ready()) return;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ensurePermissions();
+            return;
+        }
+        if (voice.isCapturing()) {
+            toast("Mikrofon sedang dipakai");
+            return;
+        }
+        final java.io.ByteArrayOutputStream pcmBuf = new java.io.ByteArrayOutputStream();
+        try {
+            voice.startCapture(new Voice.Sink() {
+                @Override public void onPcm(byte[] pcm) {
+                    synchronized (pcmBuf) {
+                        if (pcmBuf.size() < Voice.RATE * 2 * 10) {
+                            pcmBuf.write(pcm, 0, pcm.length);
+                        }
+                    }
+                }
+            });
+        } catch (RuntimeException e) {
+            toast(e.getMessage());
+            return;
+        }
+        final AlertDialog[] holder = new AlertDialog[1];
+        final Runnable finishSend = new Runnable() {
+            private boolean done;
+            @Override public void run() {
+                if (done) return;
+                done = true;
+                voice.stopCapture();
+                if (holder[0] != null && holder[0].isShowing()) holder[0].dismiss();
+                byte[] pcm;
+                synchronized (pcmBuf) { pcm = pcmBuf.toByteArray(); }
+                if (pcm.length < Voice.FRAME_BYTES * 5 || hub == null) return;
+                byte[] adpcm = Adpcm.encode(pcm);
+                hub.sendVoiceNote(adpcm);
+                addVoiceNoteBubble(myName, adpcm, true);
+            }
+        };
+        holder[0] = new AlertDialog.Builder(this)
+                .setTitle("Merekam Pesan Suara…")
+                .setMessage("Bicara sekarang (maksimal 10 detik). Pesan suara otomatis tersimpan & diteruskan ke anggota yang baru bergabung.")
+                .setCancelable(false)
+                .setPositiveButton("Kirim", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        ui.removeCallbacks(finishSend);
+                        finishSend.run();
+                    }
+                })
+                .setNegativeButton("Batal", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        ui.removeCallbacks(finishSend);
+                        voice.stopCapture();
+                    }
+                })
+                .show();
+        ui.postDelayed(finishSend, 10000L);
+    }
+
+    private void addVoiceNoteBubble(final String from, final byte[] adpcm, boolean mine) {
+        if (adpcm == null || adpcm.length <= 4) return;
+        int secs = Math.max(1, ((adpcm.length - 4) * 2) / Voice.RATE);
+        LinearLayout wrapRow = row();
+        wrapRow.setGravity(mine ? Gravity.END : Gravity.START);
+        LinearLayout b = column();
+        b.setPadding(dp(14), dp(8), dp(14), dp(8));
+        b.setBackground(pressable(shape(mine ? ACCENT : CARD, 16, mine ? 0 : LINE)));
+        if (!mine) b.addView(text(from, 12, ACCENT, true));
+        TextView playLabel = text("▶ Putar Pesan Suara (" + secs + " dtk)", 15,
+                mine ? Color.WHITE : ACCENT, true);
+        b.addView(playLabel);
+        TextView time = text("Voice Note · " + now(), 11, mine ? 0xCCFFFFFF : SUB, false);
+        time.setGravity(Gravity.END);
+        b.addView(time, fill());
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                new Thread(new Runnable() {
+                    @Override public void run() {
+                        byte[] pcm = Adpcm.decode(adpcm);
+                        if (pcm.length > 0) voice.play("vn:" + from, pcm);
+                    }
+                }, "vn-play").start();
+            }
+        });
+        wrapRow.addView(b, wrap());
+        addChatView(wrapRow);
     }
 
     /** The camera app writes a full-size photo into our CaptureProvider; no camera permission needed. */
@@ -2001,6 +2098,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         actions.add(new Runnable() { @Override public void run() { setShareLocation(!sharing); } });
         labels.add(contacts == 0 ? "Kontak PIC SMS: belum diatur" : "Kontak PIC SMS: " + contacts + " nomor");
         actions.add(new Runnable() { @Override public void run() { askEmergencyContacts(null); } });
+        labels.add("Bagikan APK Offline (Tanpa Internet)");
+        actions.add(new Runnable() { @Override public void run() { showApkShareDialog(); } });
         if (canBridge()) {
             labels.add("Jadi jembatan (percobaan)");
             actions.add(new Runnable() { @Override public void run() { askBridge(); } });
@@ -2018,6 +2117,48 @@ public class MainActivity extends Activity implements Hub.Callback {
                     @Override public void onClick(DialogInterface d, int which) { actions.get(which).run(); }
                 })
                 .show();
+    }
+
+    private void showApkShareDialog() {
+        final String url = apkShare.start(this);
+        String msg = url != null
+                ? "Rekan tim di sekitar bisa mengunduh & menginstal aplikasi ini tanpa internet:\n\n"
+                        + "1. Sambungkan ke Hotspot / Wi‑Fi Direct HP ini\n"
+                        + "2. Buka browser dan ketik:\n   " + url + "\n\n"
+                        + "Atau tekan Bagikan File APK untuk mengirim via Bluetooth / Quick Share."
+                : "Tekan Bagikan File APK untuk mengirim aplikasi ini ke HP rekan tim via Bluetooth / Quick Share tanpa internet.";
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("Bagikan APK Offline")
+                .setMessage(msg)
+                .setPositiveButton("Bagikan File APK", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        Intent i = new Intent(Intent.ACTION_SEND);
+                        i.setType("application/vnd.android.package-archive");
+                        i.putExtra(Intent.EXTRA_STREAM, CaptureProvider.APK);
+                        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        try {
+                            startActivity(Intent.createChooser(i, "Bagikan APK Growth Internal"));
+                        } catch (RuntimeException e) {
+                            toast("Tidak ada aplikasi pembagi file");
+                        }
+                    }
+                })
+                .setNegativeButton("Tutup", null);
+        if (url != null && hub != null && hub.hasPeers()) {
+            b.setNeutralButton("Kirim Link ke Grup", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) {
+                    String text = "Unduh/Update APK Growth Internal Offline di browser: " + url;
+                    hub.sendText(text);
+                    addBubble(myName, text, true);
+                }
+            });
+        }
+        AlertDialog dlg = b.show();
+        dlg.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override public void onDismiss(DialogInterface dialog) {
+                apkShare.stop();
+            }
+        });
     }
 
     private void pickPhoto() {
@@ -2750,11 +2891,13 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void stopHub() {
         if (callMode) callMode = false;
+        stopProximity();
         stopTalking();
         if (hub != null) {
             hub.stop();
             hub = null;
         }
+        if (ble != null) ble.setConnectedMode(false);
         ui.removeCallbacks(presenceTick);
         KeepAliveService.stop(this);
         members.clear();
@@ -2772,7 +2915,35 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void applyAudioRoute() {
         if (hub == null) return;
         audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        audio.setSpeakerphoneOn(speakerOn);
+        audio.setSpeakerphoneOn(speakerOn && !(callMode && nearEar));
+    }
+
+    private void startProximity() {
+        if (proximityListener != null) return;
+        if (sensors == null) sensors = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensors == null) return;
+        final Sensor prox = sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+        if (prox == null) return;
+        proximityListener = new SensorEventListener() {
+            @Override public void onSensorChanged(SensorEvent e) {
+                if (e == null || e.values == null || e.values.length == 0) return;
+                boolean near = e.values[0] < prox.getMaximumRange();
+                if (near != nearEar) {
+                    nearEar = near;
+                    applyAudioRoute();
+                }
+            }
+            @Override public void onAccuracyChanged(Sensor s, int a) {}
+        };
+        sensors.registerListener(proximityListener, prox, SensorManager.SENSOR_DELAY_NORMAL);
+    }
+
+    private void stopProximity() {
+        nearEar = false;
+        if (sensors != null && proximityListener != null) {
+            sensors.unregisterListener(proximityListener);
+            proximityListener = null;
+        }
     }
 
     private boolean ready() {
@@ -2826,10 +2997,16 @@ public class MainActivity extends Activity implements Hub.Callback {
             if (!ready()) return;
             callMode = true;
             startTalking();
-            if (!voice.isCapturing()) callMode = false;
-            else addSystemMessage("Mode telepon aktif: mikrofon terus menyala.");
+            if (!voice.isCapturing()) {
+                callMode = false;
+            } else {
+                startProximity();
+                addSystemMessage("Mode telepon aktif: mikrofon terus menyala.");
+            }
         } else {
             callMode = false;
+            stopProximity();
+            applyAudioRoute();
             stopTalking();
             addSystemMessage("Mode telepon ditutup.");
         }
@@ -2851,6 +3028,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 boolean isNew = !members.containsKey(name);
                 bleSosNames.remove(name);
                 members.put(name, photo);
+                if (ble != null) ble.setConnectedMode(true);
                 refreshMembers();
                 refreshSos();
                 setStatus("Terhubung · " + (members.size() + 1) + " orang", ACCENT);
@@ -2869,6 +3047,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 talkers.remove(name);
                 presences.remove(name);
                 voice.drop(name);
+                if (ble != null) ble.setConnectedMode(!members.isEmpty());
                 refreshCompass();
                 refreshMembers();
                 refreshTalkers();
@@ -2890,6 +3069,19 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 addImageBubble(from, jpeg, thumb, false);
                 notifyAway(Alerts.CH_MESSAGES, from, "Mengirim foto");
+            }
+        });
+    }
+
+    @Override public void onVoiceNote(final String from, final byte[] adpcm) {
+        ui.post(new Runnable() {
+            @Override public void run() {
+                if (adpcm == null || !shouldAcceptMeshText("vn:" + from,
+                        Integer.toString(java.util.Arrays.hashCode(adpcm)))) {
+                    return;
+                }
+                addVoiceNoteBubble(from, adpcm, false);
+                notifyAway(Alerts.CH_MESSAGES, from, "Mengirim pesan suara");
             }
         });
     }

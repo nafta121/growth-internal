@@ -19,6 +19,7 @@ public final class CaptureProvider extends ContentProvider {
     static final String AUTHORITY = "com.growthinternal.app.capture";
     static final Uri PHOTO = Uri.parse("content://" + AUTHORITY + "/photo.jpg");
     static final Uri VIDEO = Uri.parse("content://" + AUTHORITY + "/video.mp4");
+    static final Uri APK = Uri.parse("content://" + AUTHORITY + "/growth-internal.apk");
 
     static File file(android.content.Context c) {
         return new File(c.getCacheDir(), "capture.jpg");
@@ -31,6 +32,10 @@ public final class CaptureProvider extends ContentProvider {
     private File fileFor(Uri uri) throws FileNotFoundException {
         if (PHOTO.equals(uri)) return file(getContext());
         if (VIDEO.equals(uri)) return videoFile(getContext());
+        if (APK.equals(uri)) {
+            File apk = ApkShare.apkFile(getContext());
+            if (apk != null && apk.isFile()) return apk;
+        }
         throw new FileNotFoundException(uri.toString());
     }
 
@@ -38,7 +43,7 @@ public final class CaptureProvider extends ContentProvider {
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         File f = fileFor(uri);
-        int m = mode.contains("w")
+        int m = (mode.contains("w") && !APK.equals(uri))
                 ? ParcelFileDescriptor.MODE_READ_WRITE | ParcelFileDescriptor.MODE_CREATE
                         | ParcelFileDescriptor.MODE_TRUNCATE
                 : ParcelFileDescriptor.MODE_READ_ONLY;
@@ -60,6 +65,7 @@ public final class CaptureProvider extends ContentProvider {
     @Override public String getType(Uri uri) {
         if (PHOTO.equals(uri)) return "image/jpeg";
         if (VIDEO.equals(uri)) return "video/mp4";
+        if (APK.equals(uri)) return "application/vnd.android.package-archive";
         return null;
     }
     @Override public Uri insert(Uri uri, ContentValues values) { return null; }

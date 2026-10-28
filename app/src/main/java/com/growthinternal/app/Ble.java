@@ -102,10 +102,24 @@ final class Ble {
     private boolean advertising;
     private boolean meshAdvertising;
     private boolean scanning;
+    private boolean connectedMode;
     private String lastAdvName;
     private Presence lastAdvPresence;
     private boolean lastAdvInGroup;
     private int lastAdvPsm;
+    private static final long WATCHDOG_MS = 25000L;
+
+    private final Runnable watchdogRunnable = new Runnable() {
+        @Override public void run() {
+            if (adapter != null && adapter.isEnabled()) {
+                if (!scanning) startScan();
+                if (!advertising && !meshAdvertising && lastAdvName != null) {
+                    updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm);
+                }
+            }
+            handler.postDelayed(this, WATCHDOG_MS);
+        }
+    };
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
         @Override public void onStartSuccess(AdvertiseSettings settingsInEffect) {
@@ -184,6 +198,17 @@ final class Ble {
         return true;
     }
 
+    /** Scales BLE scan duty-cycle down while connected so 2.4 GHz airtime stays free for Wi-Fi/L2CAP voice. */
+    void setConnectedMode(boolean connected) {
+        if (this.connectedMode == connected) return;
+        this.connectedMode = connected;
+        if (scanning && scanner != null) {
+            try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}
+            scanning = false;
+            startScan();
+        }
+    }
+
     void startScan() {
         if (scanning || adapter == null) return;
         try {
@@ -191,10 +216,14 @@ final class Ble {
             scanner = adapter.getBluetoothLeScanner();
             if (scanner == null) return;
             ScanSettings settings = new ScanSettings.Builder()
-                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .setScanMode(connectedMode
+                            ? ScanSettings.SCAN_MODE_BALANCED
+                            : ScanSettings.SCAN_MODE_LOW_LATENCY)
                     .build();
             scanner.startScan(null, settings, scanCallback);
             scanning = true;
+            handler.removeCallbacks(watchdogRunnable);
+            handler.postDelayed(watchdogRunnable, WATCHDOG_MS);
         } catch (RuntimeException ignored) {
             scanning = false;
         }
@@ -225,6 +254,7 @@ final class Ble {
                             ? AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
                             : AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                     .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                    .setTimeout(0)
                     .setConnectable(true)
                     .build();
             AdvertiseData data = new AdvertiseData.Builder()
@@ -232,6 +262,8 @@ final class Ble {
                     .addServiceData(SERVICE_UUID, payload)
                     .build();
             advertiser.startAdvertising(settings, data, advertiseCallback);
+            handler.removeCallbacks(watchdogRunnable);
+            handler.postDelayed(watchdogRunnable, WATCHDOG_MS);
         } catch (RuntimeException ignored) {
             advertising = false;
         }
@@ -291,6 +323,7 @@ final class Ble {
     }
 
     void stop() {
+        handler.removeCallbacks(watchdogRunnable);
         handler.removeCallbacks(stopMeshRunnable);
         if (scanning && scanner != null) {
             try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}

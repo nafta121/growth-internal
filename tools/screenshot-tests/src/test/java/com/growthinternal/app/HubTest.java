@@ -28,6 +28,7 @@ public class HubTest {
         public void onAnnouncement(String f, String t) { log.add("announce:" + f + ":" + t); }
         public void onRejected(String r) { log.add("rejected"); }
         public void onImage(String f, byte[] j) { log.add("image:" + f + ":" + j.length); }
+        public void onVoiceNote(String f, byte[] v) { log.add("voicenote:" + f + ":" + v.length); }
         public void onJoinInfo(byte[] i) { log.add("joininfo:" + new String(i)); }
         public void onUplink(boolean c) { log.add("uplink:" + c); }
         public void onVideoIncoming(String f) { log.add("video-incoming:" + f); }

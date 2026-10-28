@@ -251,4 +251,94 @@ public class AdpcmTest {
         hubB.stop();
         hubA.stop();
     }
+
+    @Test public void boundedMediaAgeDropsStaleAudioAndAudioConcealmentFades() throws Exception {
+        // 1. Packet Loss Concealment (PLC) fades 75% -> 25% smoothly
+        byte[] prev = new byte[640];
+        ByteBuffer b = ByteBuffer.wrap(prev).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < 320; i++) b.putShort((short) 10000);
+        byte[] concealed = Voice.concealFrame(prev);
+        assertEquals(640, concealed.length);
+        ByteBuffer cb = ByteBuffer.wrap(concealed).order(ByteOrder.LITTLE_ENDIAN);
+        short first = cb.getShort(0);
+        short last = cb.getShort(638);
+        assertTrue("First PLC sample should be ~7500, got " + first, first >= 7000 && first <= 8000);
+        assertTrue("Last PLC sample should be ~2500, got " + last, last >= 2000 && last <= 3000);
+
+        // 2. BoundedMediaAge drops audio older than MAX_AUDIO_AGE_MS (350 ms)
+        final PipedOutputStream aOut = new PipedOutputStream();
+        final PipedInputStream bIn = new PipedInputStream(aOut, 65536);
+        final PipedOutputStream bOut = new PipedOutputStream();
+        final PipedInputStream aIn = new PipedInputStream(bOut, 65536);
+        Closeable rawClose = new Closeable() {
+            @Override public void close() throws IOException {
+                aOut.close(); bOut.close(); aIn.close(); bIn.close();
+            }
+        };
+        final HubTest.Rec rB = new HubTest.Rec();
+        Link linkA = new Link(aIn, aOut, rawClose, false, new Link.Listener() {
+            @Override public void onFrame(Link link, Frame frame) {}
+            @Override public void onClosed(Link link) {}
+        });
+        Link linkB = new Link(bIn, bOut, rawClose, false, new Link.Listener() {
+            @Override public void onFrame(Link link, Frame frame) {
+                if (frame.type == Frame.AUDIO) rB.onAudio(frame.sender, frame.payload);
+                else if (frame.type == Frame.TEXT) rB.onText(frame.sender, new String(frame.payload, Hub.UTF8));
+            }
+            @Override public void onClosed(Link link) {}
+        });
+        linkA.start();
+        linkB.start();
+
+        long staleTime = System.currentTimeMillis() - (Link.MAX_AUDIO_AGE_MS + 500L);
+        linkA.send(new Frame(Frame.AUDIO, "Andi", new byte[640], staleTime));
+        linkA.send(new Frame(Frame.AUDIO, "Andi", new byte[320], System.currentTimeMillis()));
+        linkA.send(new Frame(Frame.TEXT, "Andi", "ok".getBytes(Hub.UTF8), staleTime));
+
+        HubTest.waitFor(rB, "audio:Andi:320");
+        HubTest.waitFor(rB, "text:Andi:ok");
+        assertFalse("Stale 640-byte audio frame should have been dropped",
+                rB.log.contains("audio:Andi:640"));
+
+        linkA.close();
+        linkB.close();
+    }
+
+    @Test public void storeAndForwardReplaysChatAnnouncementsAndVoiceNotesToLateJoiner() throws Exception {
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        int port = 19135;
+        HubTest.Rec rOwner = new HubTest.Rec();
+        HubTest.Rec rBudi = new HubTest.Rec();
+        HubTest.Rec rSari = new HubTest.Rec();
+
+        Hub owner = new Hub("PIC", null, rOwner).port(port);
+        owner.startServer(lo);
+        Thread.sleep(200);
+
+        Hub budi = new Hub("Budi", null, rBudi).port(port);
+        budi.startClient(lo);
+        HubTest.waitFor(rOwner, "join:Budi");
+
+        // PIC and Budi send messages, an announcement, and a voice note BEFORE Sari joins
+        owner.sendAnnouncement("Rotasi ke Pos 2 pukul 14:00");
+        budi.sendText("Pos 1 siap bergeser");
+        byte[] vnAdpcm = Adpcm.encode(new byte[Voice.RATE * 2]); // 1-second voice note
+        owner.sendVoiceNote(vnAdpcm);
+
+        HubTest.waitFor(rBudi, "announce:PIC:Rotasi ke Pos 2 pukul 14:00");
+        HubTest.waitFor(rOwner, "text:Budi:Pos 1 siap bergeser");
+        HubTest.waitFor(rBudi, "voicenote:PIC:" + vnAdpcm.length);
+
+        // Sari walks into range later and joins the group: Store-and-Forward replays all 3!
+        Hub sari = new Hub("Sari", null, rSari).port(port);
+        sari.startClient(lo);
+        HubTest.waitFor(rSari, "join:Budi");
+        HubTest.waitFor(rSari, "announce:PIC:Rotasi ke Pos 2 pukul 14:00");
+        HubTest.waitFor(rSari, "text:Budi:Pos 1 siap bergeser");
+        HubTest.waitFor(rSari, "voicenote:PIC:" + vnAdpcm.length);
+
+        sari.stop();
+        budi.stop();
+        owner.stop();
+    }
 }

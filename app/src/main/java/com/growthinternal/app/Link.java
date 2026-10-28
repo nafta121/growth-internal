@@ -21,6 +21,7 @@ final class Link {
 
     private static final int MAX_QUEUED_AUDIO = 25;
     private static final int MAX_LOW_BW_BULK = 64;
+    static final long MAX_AUDIO_AGE_MS = 350L;
     // Each side pings when idle; a link silent for longer than the timeout is dropped,
     // so a phone walking out of range is noticed within seconds.
     private static final int PING_MS = 3000;
@@ -79,9 +80,12 @@ final class Link {
     void send(Frame f) {
         if (closed) return;
         // Drop audio rather than build up delay when the radio link is slow.
-        if (f.type == Frame.AUDIO) {
+        if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM) {
             if (queue.size() > MAX_QUEUED_AUDIO) return;
-            if (lowBandwidth) f = new Frame(Frame.AUDIO_ADPCM, f.sender, Adpcm.encode(f.payload));
+            if (System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) return;
+            if (lowBandwidth && f.type == Frame.AUDIO) {
+                f = new Frame(Frame.AUDIO_ADPCM, f.sender, Adpcm.encode(f.payload), f.createdMs);
+            }
         }
         if (f.type == Frame.IMAGE || f.type == Frame.VIDEO_CHUNK) {
             if (lowBandwidth && bulk.size() >= MAX_LOW_BW_BULK) return;
@@ -102,6 +106,10 @@ final class Link {
                 if (f == null) f = queue.poll(PING_MS, TimeUnit.MILLISECONDS);
                 if (f == WAKE) continue;
                 if (f == null) f = new Frame(Frame.PING, "", null);
+                if ((f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM)
+                        && System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) {
+                    continue;
+                }
                 out.writeByte(f.type);
                 out.writeUTF(f.sender);
                 out.writeInt(f.payload.length);

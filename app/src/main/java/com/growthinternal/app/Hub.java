@@ -32,6 +32,7 @@ final class Hub implements Link.Listener {
         void onPresence(String from, byte[] presence);
         void onAnnouncement(String from, String text);
         void onImage(String from, byte[] jpeg);
+        void onVoiceNote(String from, byte[] adpcm);
         void onVideoIncoming(String from);
         void onVideo(String from, byte[] mp4);
         void onRejected(String reason);
@@ -42,6 +43,7 @@ final class Hub implements Link.Listener {
 
     static final int PORT = 8988;
     static final int MAX_LINKS = 16;
+    private static final int MAX_HISTORY = 32;
     static final Charset UTF8 = Charset.forName("UTF-8");
 
     private final Callback cb;
@@ -50,6 +52,8 @@ final class Hub implements Link.Listener {
     private final Clips.Assembler clips = new Clips.Assembler();
     // Latest PRESENCE payload per member, replayed by the owner to phones that join later.
     private final Map<String, byte[]> presences = new LinkedHashMap<String, byte[]>();
+    // Store-and-forward buffer for recent chat, instructions, and voice notes.
+    private final List<Frame> history = new ArrayList<Frame>();
     private volatile byte[] myPresence;
     private final String myName;
     private final byte[] myPhoto;
@@ -225,17 +229,34 @@ final class Hub implements Link.Listener {
         link.start();
     }
 
+    private void recordHistory(Frame f) {
+        synchronized (history) {
+            if (history.size() >= MAX_HISTORY) history.remove(0);
+            history.add(f);
+        }
+    }
+
     void sendPresence(byte[] presence) {
         myPresence = presence;
         broadcast(new Frame(Frame.PRESENCE, myName, presence), null);
     }
 
     void sendAnnouncement(String text) {
-        broadcast(new Frame(Frame.ANNOUNCE, myName, text.getBytes(UTF8)), null);
+        Frame f = new Frame(Frame.ANNOUNCE, myName, text.getBytes(UTF8));
+        recordHistory(f);
+        broadcast(f, null);
     }
 
     void sendText(String text) {
-        broadcast(new Frame(Frame.TEXT, myName, text.getBytes(UTF8)), null);
+        Frame f = new Frame(Frame.TEXT, myName, text.getBytes(UTF8));
+        recordHistory(f);
+        broadcast(f, null);
+    }
+
+    void sendVoiceNote(byte[] adpcm) {
+        Frame f = new Frame(Frame.VOICE_NOTE, myName, adpcm);
+        recordHistory(f);
+        broadcast(f, null);
     }
 
     void sendImage(byte[] jpeg) {
@@ -302,6 +323,14 @@ final class Hub implements Link.Listener {
                                 from.send(new Frame(Frame.PRESENCE, e.getKey(), e.getValue()));
                             }
                         }
+                        synchronized (history) {
+                            for (Frame h : history) {
+                                if (!h.sender.equals(f.sender)
+                                        && (h.sender.equals(myName) || members.containsKey(h.sender))) {
+                                    from.send(h);
+                                }
+                            }
+                        }
                         byte[] info = joinInfo;
                         if (owner && info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
                     }
@@ -342,6 +371,7 @@ final class Hub implements Link.Listener {
         }
         switch (f.type) {
             case Frame.TEXT:
+                recordHistory(f);
                 cb.onText(f.sender, new String(f.payload, UTF8));
                 break;
             case Frame.AUDIO:
@@ -358,7 +388,12 @@ final class Hub implements Link.Listener {
                 cb.onPresence(f.sender, f.payload);
                 break;
             case Frame.ANNOUNCE:
+                recordHistory(f);
                 cb.onAnnouncement(f.sender, new String(f.payload, UTF8));
+                break;
+            case Frame.VOICE_NOTE:
+                recordHistory(f);
+                cb.onVoiceNote(f.sender, f.payload);
                 break;
             case Frame.IMAGE:
                 cb.onImage(f.sender, f.payload);
