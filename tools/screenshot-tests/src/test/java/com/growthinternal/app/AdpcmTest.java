@@ -527,16 +527,22 @@ public class AdpcmTest {
         MeshAccess.Session sPeriph = new MeshAccess.Session(
                 false, (short) 22, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);
         final MeshAccess.Pipe[] pair = new MeshAccess.Pipe[2];
+        Closeable closeBoth = new Closeable() {
+            @Override public void close() throws IOException {
+                if (pair[0] != null) pair[0].close();
+                if (pair[1] != null) pair[1].close();
+            }
+        };
         pair[0] = new MeshAccess.Pipe(sCentral, new MeshAccess.PacketSender() {
             @Override public void sendPacket(byte[] packet) {
                 if (pair[1] != null) pair[1].onIncomingPacket(packet, null);
             }
-        }, null);
+        }, closeBoth);
         pair[1] = new MeshAccess.Pipe(sPeriph, new MeshAccess.PacketSender() {
             @Override public void sendPacket(byte[] packet) {
                 if (pair[0] != null) pair[0].onIncomingPacket(packet, null);
             }
-        }, null);
+        }, closeBoth);
         pair[0].setMtuPayload(27);
         pair[1].setMtuPayload(27);
         pair[1].onIncomingPacket(sCentral.startHandshake(), null);
