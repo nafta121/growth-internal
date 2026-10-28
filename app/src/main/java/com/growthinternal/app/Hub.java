@@ -68,6 +68,15 @@ final class Hub implements Link.Listener {
 
     boolean hasPeers() { return !links.isEmpty(); }
 
+    boolean isOwner() { return owner; }
+
+    Hub asOwner(boolean isOwner) {
+        this.owner = isOwner;
+        return this;
+    }
+
+    int port() { return port; }
+
     boolean isBridged() { return uplink != null; }
 
     /** Tests run several hubs on one machine, each on its own port. */
@@ -95,7 +104,9 @@ final class Hub implements Link.Listener {
                 try {
                     ServerSocket s = new ServerSocket();
                     s.setReuseAddress(true);
-                    s.bind(new InetSocketAddress(groupAddress, port));
+                    s.bind(groupAddress == null
+                            ? new InetSocketAddress(port)
+                            : new InetSocketAddress(groupAddress, port));
                     synchronized (Hub.this) {
                         if (stopped) { s.close(); return; }
                         servers.add(s);
@@ -173,6 +184,17 @@ final class Hub implements Link.Listener {
     private void addLink(Socket s) throws IOException {
         if (stopped) { s.close(); return; }
         Link link = new Link(s, this);
+        link.send(new Frame(Frame.HELLO, myName, myPhoto));
+        byte[] p = myPresence;
+        if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
+        links.add(link);
+        link.start();
+    }
+
+    void addStreamLink(java.io.InputStream in, java.io.OutputStream out,
+            java.io.Closeable raw, boolean lowBandwidth) throws IOException {
+        if (stopped || links.size() >= MAX_LINKS) { raw.close(); return; }
+        Link link = new Link(in, out, raw, lowBandwidth, this);
         link.send(new Frame(Frame.HELLO, myName, myPhoto));
         byte[] p = myPresence;
         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
@@ -274,6 +296,10 @@ final class Hub implements Link.Listener {
         if (f.type == Frame.REJECT) {
             cb.onRejected(new String(f.payload, UTF8));
             return;
+        }
+        if (f.type == Frame.AUDIO_ADPCM) {
+            if (owner && !from.behind.contains(f.sender)) return;
+            f = new Frame(Frame.AUDIO, f.sender, Adpcm.decode(f.payload));
         }
         if (owner) {
             // A sender belongs to the link it joined through: a plain member only speaks for

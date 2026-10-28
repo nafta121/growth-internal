@@ -70,10 +70,10 @@ jobs:
           gh release edit "$TAG" --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp).
 
           ### Perubahan di v$VERSION
-          - **Eliminasi Risiko ANR (\`MainActivity\`)**: Memindahkan decode foto profil (\`Avatars.fromUri\`), decode foto obrolan & layar penuh (\`Photos.decode\`), ekstraksi thumbnail video (\`ThumbnailUtils.createVideoThumbnail\`), pembersihan klip sementara (\`clearClips\`), dan penghitungan ubin peta (\`Tiles.count\`) ke *background thread*.
-          - **Optimasi Render Peta (\`MapView\`)**: Menghapus alokasi \`Rect\` dan \`RectF\` per-*frame* di \`onDraw\`, \`drawTile\`, dan \`drawTarget\`.
-          - **Keamanan Intent & Alur Izin (\`MainActivity\`)**: Menambahkan flag \`RECEIVER_NOT_EXPORTED\` pada \`registerReceiver\` (API 33+), menunda permintaan izin hingga fitur digunakan, dan menambahkan dialog pintasan ke Pengaturan Aplikasi saat izin ditolak permanen.
-          - **Dukungan Edge-to-Edge & Pengujian (\`MainActivity\`, \`PhotosTest\`)**: Menambahkan \`OnApplyWindowInsetsListener\` pada kontainer utama serta pengujian unit \`PhotosTest\`. Lihat rincian lengkap di [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md).
+          - **Hotspot / Wi-Fi Lokal Tanpa Internet (\`Lan\`)**: Penemuan perangkat otomatis via UDP broadcast port \`8989\` dan koneksi TCP langsung di satu jaringan Hotspot HP atau router lokal tanpa dialog konfirmasi sistem.
+          - **Bluetooth Classic RFCOMM + Audio IMA ADPCM 4:1 (\`Bt\`, \`Adpcm\`, \`Link\`, \`Hub\`)**: Komunikasi suara *Push-to-Talk* (dikompresi 4:1 menjadi \`64 kbps\`), teks, status, dan foto melalui Bluetooth RFCOMM tanpa internet maupun Wi-Fi.
+          - **Beacon Darurat & Lokasi via Bluetooth Low Energy (\`Ble\`)**: Pemancaran dan pemindaian *Service Data* BLE 20-byte yang mengirimkan sinyal **PRIORITAS/SOS**, baterai, dan koordinat GPS ke HP Tim sekitar bahkan sebelum koneksi grup terbentuk.
+          - **Jembatan Multi-Transport Seamless (\`MainActivity\`, \`Hub\`, \`AdpcmTest\`)**: Pemilik grup otomatis menjembatani anggota Wi-Fi Direct, Hotspot/LAN, dan Bluetooth ke dalam satu saluran grup yang sama. Lihat rincian lengkap di [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md).
 
           ### Cek keaslian file
           - Versi build (versionCode): $VC

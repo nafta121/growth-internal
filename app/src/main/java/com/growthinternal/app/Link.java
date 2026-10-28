@@ -2,14 +2,17 @@ package com.growthinternal.app;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/** A TCP connection to one other phone, with its own reader and writer threads. */
+/** A framed connection to one other phone (TCP or Bluetooth RFCOMM), with reader and writer threads. */
 final class Link {
     interface Listener {
         void onFrame(Link link, Frame frame);
@@ -17,12 +20,14 @@ final class Link {
     }
 
     private static final int MAX_QUEUED_AUDIO = 25;
+    private static final int MAX_LOW_BW_BULK = 64;
     // Each side pings when idle; a link silent for longer than the timeout is dropped,
     // so a phone walking out of range is noticed within seconds.
     private static final int PING_MS = 3000;
     private static final int TIMEOUT_MS = 10000;
 
-    private final Socket socket;
+    private final Closeable raw;
+    final boolean lowBandwidth;
     private final Listener listener;
     private final DataInputStream in;
     private final DataOutputStream out;
@@ -42,12 +47,21 @@ final class Link {
     volatile boolean relay;
 
     Link(Socket socket, Listener listener) throws IOException {
-        this.socket = socket;
+        this(configure(socket).getInputStream(), socket.getOutputStream(), socket, false, listener);
+    }
+
+    Link(InputStream in, OutputStream out, Closeable raw, boolean lowBandwidth, Listener listener) {
+        this.raw = raw;
+        this.lowBandwidth = lowBandwidth;
         this.listener = listener;
+        this.in = new DataInputStream(new BufferedInputStream(in));
+        this.out = new DataOutputStream(new BufferedOutputStream(out));
+    }
+
+    private static Socket configure(Socket socket) throws IOException {
         socket.setTcpNoDelay(true);
         socket.setSoTimeout(TIMEOUT_MS);
-        in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-        out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+        return socket;
     }
 
     void start() {
@@ -64,8 +78,12 @@ final class Link {
     void send(Frame f) {
         if (closed) return;
         // Drop audio rather than build up delay when the radio link is slow.
-        if (f.type == Frame.AUDIO && queue.size() > MAX_QUEUED_AUDIO) return;
+        if (f.type == Frame.AUDIO) {
+            if (queue.size() > MAX_QUEUED_AUDIO) return;
+            if (lowBandwidth) f = new Frame(Frame.AUDIO_ADPCM, f.sender, Adpcm.encode(f.payload));
+        }
         if (f.type == Frame.IMAGE || f.type == Frame.VIDEO_CHUNK) {
+            if (lowBandwidth && bulk.size() >= MAX_LOW_BW_BULK) return;
             bulk.offer(f);
             if (queue.isEmpty()) queue.offer(WAKE);
         } else {
@@ -119,7 +137,7 @@ final class Link {
             if (closed) return;
             closed = true;
         }
-        try { socket.close(); } catch (IOException ignored) { }
+        try { raw.close(); } catch (IOException ignored) { }
         if (writer != null) writer.interrupt();
         listener.onClosed(this);
     }

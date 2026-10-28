@@ -116,6 +116,10 @@ public class MainActivity extends Activity implements Hub.Callback {
     private android.net.Network uplinkNetwork;
     private java.net.InetAddress uplinkTarget;
     private boolean isOwner;
+    private boolean p2pGroupActive;
+    private Lan lan;
+    private Bt bt;
+    private Ble ble;
     private final Voice voice = new Voice();
     private String myName;
     private byte[] myPhoto;
@@ -124,6 +128,11 @@ public class MainActivity extends Activity implements Hub.Callback {
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
     private final Set<String> talkers = new LinkedHashSet<String>();
     private final List<WifiP2pDevice> peers = new ArrayList<WifiP2pDevice>();
+    private final Map<String, Lan.Peer> lanPeers = new LinkedHashMap<String, Lan.Peer>();
+    private final Map<String, android.bluetooth.BluetoothDevice> btPeers =
+            new LinkedHashMap<String, android.bluetooth.BluetoothDevice>();
+    private final Map<String, String> btNames = new LinkedHashMap<String, String>();
+    private final Set<String> bleSosNames = new HashSet<String>();
     private final Map<String, Presence> presences = new HashMap<String, Presence>();
     private final Set<String> sosSilenced = new HashSet<String>();
     private final Presence me = new Presence();
@@ -221,33 +230,64 @@ public class MainActivity extends Activity implements Hub.Callback {
         setContentView(frame);
         refreshAll();
 
+        lan = new Lan(new Lan.Listener() {
+            @Override public void onPeer(final Lan.Peer peer) {
+                ui.post(new Runnable() {
+                    @Override public void run() { onLanPeer(peer); }
+                });
+            }
+        });
+        lan.start();
+        bt = new Bt(this, new Bt.Listener() {
+            @Override public void onDevice(final android.bluetooth.BluetoothDevice device, final String name) {
+                ui.post(new Runnable() {
+                    @Override public void run() { onBtDevice(device, name); }
+                });
+            }
+            @Override public void onIncoming(final android.bluetooth.BluetoothSocket socket) {
+                ui.post(new Runnable() {
+                    @Override public void run() { onBtIncoming(socket); }
+                });
+            }
+        });
+        ble = new Ble(new Ble.Listener() {
+            @Override public void onBeacon(final Ble.Beacon beacon, final android.bluetooth.BluetoothDevice device) {
+                ui.post(new Runnable() {
+                    @Override public void run() { onBleBeacon(beacon, device); }
+                });
+            }
+        });
+
         p2p = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
         if (p2p == null) {
             setStatus("HP ini tidak mendukung Wi‑Fi Direct", DANGER);
-            return;
-        }
-        channel = p2p.initialize(this, getMainLooper(), null);
-        receiver = new BroadcastReceiver() {
-            @Override public void onReceive(Context c, Intent i) { onP2pEvent(i); }
-        };
-        IntentFilter f = new IntentFilter();
-        f.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
-        f.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
-        f.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
-        if (Build.VERSION.SDK_INT >= 33) {
-            try {
-                Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
-                        .invoke(this, receiver, f, 4 /* RECEIVER_NOT_EXPORTED */);
-            } catch (Exception e) {
+        } else {
+            channel = p2p.initialize(this, getMainLooper(), null);
+            receiver = new BroadcastReceiver() {
+                @Override public void onReceive(Context c, Intent i) { onP2pEvent(i); }
+            };
+            IntentFilter f = new IntentFilter();
+            f.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
+            f.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
+            f.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
+            if (Build.VERSION.SDK_INT >= 33) {
+                try {
+                    Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
+                            .invoke(this, receiver, f, 4 /* RECEIVER_NOT_EXPORTED */);
+                } catch (Exception e) {
+                    registerReceiver(receiver, f);
+                }
+            } else {
                 registerReceiver(receiver, f);
             }
-        } else {
-            registerReceiver(receiver, f);
         }
 
         addSystemMessage("Komunikasi lapangan tanpa internet & sinyal. Nyalakan Wi‑Fi dan Lokasi di setiap HP Tim, "
                 + "lalu ketuk ikon cari.");
-        if (neededPermissions().length == 0) startLocation();
+        if (neededPermissions().length == 0) {
+            startLocation();
+            startOfflineTransports();
+        }
         // First launch: the default name is the phone model, which nobody in the group recognizes.
         if (state == null && !prefs.contains("name")) {
             ui.postDelayed(new Runnable() {
@@ -294,6 +334,9 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.removeCallbacks(presenceTick);
         if (locations != null && locationListener != null) locations.removeUpdates(locationListener);
         if (receiver != null) unregisterReceiver(receiver);
+        if (lan != null) lan.stop();
+        if (bt != null) bt.stop();
+        if (ble != null) ble.stop();
         stopHub();
         stopBridge();
         if (p2p != null) p2p.removeGroup(channel, null);
@@ -764,24 +807,44 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void refreshPeers() {
         peerList.removeAllViews();
-        emptyPeers.setVisibility(peers.isEmpty() ? View.VISIBLE : View.GONE);
+        boolean any = !peers.isEmpty() || !lanPeers.isEmpty() || !btPeers.isEmpty();
+        emptyPeers.setVisibility(any ? View.GONE : View.VISIBLE);
+        for (final Lan.Peer lp : lanPeers.values()) {
+            addPeerRow(lp.name, lp.inGroup
+                    ? "Hotspot/Wi‑Fi Lokal · Grup aktif"
+                    : "Hotspot/Wi‑Fi Lokal · Siap terhubung", new View.OnClickListener() {
+                @Override public void onClick(View v) { connectLan(lp); }
+            });
+        }
         for (final WifiP2pDevice d : peers) {
             String n = TextUtils.isEmpty(d.deviceName) ? d.deviceAddress : d.deviceName;
-            LinearLayout r = row();
-            r.setPadding(dp(4), dp(10), dp(4), dp(10));
-            r.setBackground(pressable(shape(CARD, 12, 0)));
-            r.addView(avatar(n, null, 36));
-            LinearLayout c = column();
-            c.setPadding(dp(12), 0, 0, 0);
-            c.addView(text(n, 15, TEXT, true));
-            c.addView(text(statusText(d.status), 12, SUB, false));
-            r.addView(c, grow());
-            r.addView(text("Hubungkan", 14, ACCENT, true));
-            r.setOnClickListener(new View.OnClickListener() {
+            addPeerRow(n, statusText(d.status), new View.OnClickListener() {
                 @Override public void onClick(View v) { connect(d); }
             });
-            peerList.addView(r, fill());
         }
+        for (Map.Entry<String, android.bluetooth.BluetoothDevice> e : btPeers.entrySet()) {
+            final android.bluetooth.BluetoothDevice dev = e.getValue();
+            final String n = btNames.get(e.getKey());
+            if (n == null || lanPeers.containsKey(n)) continue;
+            addPeerRow(n, "Bluetooth Jarak Dekat · Suara & Chat", new View.OnClickListener() {
+                @Override public void onClick(View v) { connectBt(dev, n); }
+            });
+        }
+    }
+
+    private void addPeerRow(String name, String subtitle, View.OnClickListener onClick) {
+        LinearLayout r = row();
+        r.setPadding(dp(4), dp(10), dp(4), dp(10));
+        r.setBackground(pressable(shape(CARD, 12, 0)));
+        r.addView(avatar(name, null, 36));
+        LinearLayout c = column();
+        c.setPadding(dp(12), 0, 0, 0);
+        c.addView(text(name, 15, TEXT, true));
+        c.addView(text(subtitle, 12, SUB, false));
+        r.addView(c, grow());
+        r.addView(text("Hubungkan", 14, ACCENT, true));
+        r.setOnClickListener(onClick);
+        peerList.addView(r, fill());
     }
 
     private void refreshMembers() {
@@ -1290,7 +1353,10 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void sendPresence() {
-        if (hub != null) hub.sendPresence(buildPresence().encode());
+        Presence p = buildPresence();
+        if (hub != null) hub.sendPresence(p.encode());
+        if (ble != null && neededPermissions().length == 0) ble.updateAdvertise(myName, p);
+        if (lan != null) lan.announce(myName, hub != null ? hub.port() : Hub.PORT, hub != null && hub.isOwner());
     }
 
     private void setMyStatus(int status) {
@@ -1461,7 +1527,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         List<String> sos = new ArrayList<String>();
         boolean unsilenced = false;
         for (Map.Entry<String, Presence> e : presences.entrySet()) {
-            if (e.getValue().status != Presence.SOS || !members.containsKey(e.getKey())) continue;
+            if (e.getValue().status != Presence.SOS
+                    || (!members.containsKey(e.getKey()) && !bleSosNames.contains(e.getKey()))) continue;
             sos.add(e.getKey());
             if (!sosSilenced.contains(e.getKey())) unsilenced = true;
         }
@@ -1657,6 +1724,13 @@ public class MainActivity extends Activity implements Hub.Callback {
             Presence p = presences.get(e.getKey());
             if (p == null || !p.hasLocation) continue;
             targets.add(new RadarView.Target(e.getKey(), Avatars.circle(e.getKey(), e.getValue(), dp(38)),
+                    statusColor(p.status), p.lat, p.lon));
+        }
+        for (String n : bleSosNames) {
+            if (members.containsKey(n)) continue;
+            Presence p = presences.get(n);
+            if (p == null || !p.hasLocation) continue;
+            targets.add(new RadarView.Target(n, Avatars.circle(n, null, dp(38)),
                     statusColor(p.status), p.lat, p.lon));
         }
         mapView.setData(shareLocation() ? myLocation : null, targets);
@@ -1964,6 +2038,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 .putString("name", name)
                 .putString("photo", photo == null ? null : Base64.encodeToString(photo, Base64.NO_WRAP))
                 .apply();
+        if (ble != null && neededPermissions().length == 0) ble.updateAdvertise(myName, buildPresence());
         refreshAll();
         if (hub != null) toast("Nama/foto baru terlihat oleh anggota saat terhubung lagi");
     }
@@ -1974,6 +2049,11 @@ public class MainActivity extends Activity implements Hub.Callback {
         List<String> p = new ArrayList<String>();
         p.add(Manifest.permission.ACCESS_FINE_LOCATION);
         p.add(Manifest.permission.RECORD_AUDIO);
+        if (Build.VERSION.SDK_INT >= 31) {
+            p.add("android.permission.BLUETOOTH_SCAN");
+            p.add("android.permission.BLUETOOTH_CONNECT");
+            p.add("android.permission.BLUETOOTH_ADVERTISE");
+        }
         if (Build.VERSION.SDK_INT >= 33) {
             p.add("android.permission.NEARBY_WIFI_DEVICES");
             p.add("android.permission.POST_NOTIFICATIONS");
@@ -1996,7 +2076,10 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (code != REQ_PERMS) return;
         startLocation();
         String[] missing = neededPermissions();
-        if (missing.length == 0) return;
+        if (missing.length == 0) {
+            startOfflineTransports();
+            return;
+        }
         addSystemMessage("Izin Lokasi/Perangkat sekitar dan Mikrofon diperlukan agar aplikasi "
                 + "bisa menemukan HP lain dan mengirim suara.");
         for (String p : missing) {
@@ -2023,6 +2106,143 @@ public class MainActivity extends Activity implements Hub.Callback {
                 .show();
     }
 
+    // ----------------------------------------- multi-transport (LAN, BT, BLE)
+
+    private void startOfflineTransports() {
+        if (bt != null) bt.startServer();
+        if (ble != null) {
+            ble.startScan();
+            ble.updateAdvertise(myName, buildPresence());
+        }
+        if (lan != null) {
+            lan.announce(myName, hub != null ? hub.port() : Hub.PORT, hub != null && hub.isOwner());
+        }
+    }
+
+    private Hub initHub(boolean ownerMode) {
+        if (hub != null) return hub;
+        hub = new Hub(myName, myPhoto, this).asOwner(ownerMode);
+        isOwner = ownerMode;
+        hub.sendPresence(buildPresence().encode());
+        ui.removeCallbacks(presenceTick);
+        ui.postDelayed(presenceTick, PRESENCE_EVERY_MS);
+        updateKeepAlive();
+        alertBanner.setVisibility(View.GONE);
+        applyAudioRoute();
+        return hub;
+    }
+
+    private void onLanPeer(Lan.Peer peer) {
+        if (peer == null || peer.name.equals(myName)) return;
+        lanPeers.put(peer.name, peer);
+        refreshPeers();
+        if (hub == null) {
+            setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
+        }
+    }
+
+    private void onBtDevice(android.bluetooth.BluetoothDevice device, String name) {
+        if (device == null || name == null || name.equals(myName)) return;
+        String addr = device.getAddress();
+        if (addr == null) return;
+        btPeers.put(addr, device);
+        btNames.put(addr, name);
+        refreshPeers();
+        if (hub == null) {
+            setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
+        }
+    }
+
+    private void onBtIncoming(final android.bluetooth.BluetoothSocket socket) {
+        final Hub h = initHub(hub == null || isOwner);
+        refreshAll();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    h.addStreamLink(socket.getInputStream(), socket.getOutputStream(), socket, true);
+                } catch (java.io.IOException e) {
+                    try { socket.close(); } catch (java.io.IOException ignored) {}
+                }
+            }
+        }, "bt-accept").start();
+    }
+
+    private void onBleBeacon(Ble.Beacon beacon, android.bluetooth.BluetoothDevice device) {
+        if (beacon == null || beacon.name.equals(myName)) return;
+        if (device != null && device.getAddress() != null && !btPeers.containsKey(device.getAddress())) {
+            btPeers.put(device.getAddress(), device);
+            btNames.put(device.getAddress(), beacon.name);
+            refreshPeers();
+        }
+        if (members.containsKey(beacon.name)) return;
+        Presence old = presences.get(beacon.name);
+        boolean wasSos = old != null && old.status == Presence.SOS;
+        if (beacon.presence.status == Presence.SOS) {
+            presences.put(beacon.name, beacon.presence);
+            bleSosNames.add(beacon.name);
+            if (!wasSos) {
+                sosSilenced.remove(beacon.name);
+                addSystemMessage(beacon.name + " mengirim Panggilan Prioritas (via sinyal BLE sekitar)");
+                notifyAway(Alerts.CH_SOS, "PRIORITAS: " + beacon.name + " butuh supporting/backup!",
+                        whereIs(beacon.presence));
+            }
+            refreshSos();
+            refreshCompass();
+        } else if (wasSos && bleSosNames.remove(beacon.name)) {
+            presences.remove(beacon.name);
+            refreshSos();
+            refreshCompass();
+        }
+    }
+
+    private void connectLan(Lan.Peer peer) {
+        if (peer == null || !ensurePermissions()) return;
+        if (peer.inGroup) {
+            Hub h = initHub(false);
+            setStatus("Menyambung ke " + peer.name + " (Hotspot/Wi‑Fi Lokal)…", AMBER);
+            h.port(peer.port).startClient(peer.address);
+            refreshAll();
+        } else {
+            Hub h = initHub(true);
+            h.startServer(null);
+            refreshAll();
+            setStatus("Menunggu " + peer.name + " bergabung (Hotspot/Wi‑Fi Lokal)", AMBER);
+            if (lan != null) lan.announce(myName, h.port(), true);
+        }
+    }
+
+    private void connectBt(final android.bluetooth.BluetoothDevice device, final String name) {
+        if (device == null || !ensurePermissions()) return;
+        final Hub h = initHub(false);
+        setStatus("Menyambung ke " + name + " via Bluetooth…", AMBER);
+        refreshAll();
+        bt.connect(device, h, new Runnable() {
+            @Override public void run() {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        setStatus("Terhubung via Bluetooth", ACCENT);
+                    }
+                });
+            }
+        }, new Runnable() {
+            @Override public void run() {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (hub == h && !h.hasPeers()) {
+                            stopHub();
+                            refreshAll();
+                        }
+                        setStatus("Gagal menyambung Bluetooth ke " + name, DANGER);
+                    }
+                });
+            }
+        });
+    }
+
+    private int totalDiscoveredPeers() {
+        return peers.size() + lanPeers.size() + btPeers.size();
+    }
+
     // ------------------------------------------------------ Wi-Fi Direct
 
     private void discover() {
@@ -2030,7 +2250,13 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void discover(final int attempt) {
-        if (p2p == null || !ensurePermissions()) return;
+        if (!ensurePermissions()) return;
+        startOfflineTransports();
+        if (bt != null) bt.discover();
+        if (p2p == null) {
+            setStatus("Mencari perangkat via Hotspot & Bluetooth", AMBER);
+            return;
+        }
         setStatus("Mencari perangkat di sekitar", AMBER);
         p2p.discoverPeers(channel, new WifiP2pManager.ActionListener() {
             @Override public void onSuccess() { }
@@ -2043,7 +2269,9 @@ public class MainActivity extends Activity implements Hub.Callback {
                     }, 1500);
                     return;
                 }
-                setStatus("Pencarian gagal: " + p2pReason(reason), DANGER);
+                if (lanPeers.isEmpty() && btPeers.isEmpty()) {
+                    setStatus("Pencarian gagal: " + p2pReason(reason), DANGER);
+                }
             }
         });
     }
@@ -2093,13 +2321,16 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void disconnect() {
+        p2pGroupActive = false;
         stopHub();
         stopBridge();
         upstreamInfo = null;
         refreshAll();
-        if (p2p == null) return;
-        p2p.cancelConnect(channel, null);
-        p2p.removeGroup(channel, null);
+        if (lan != null) lan.announce(myName, Hub.PORT, false);
+        if (p2p != null) {
+            p2p.cancelConnect(channel, null);
+            p2p.removeGroup(channel, null);
+        }
         addSystemMessage("Kamu keluar dari grup.");
     }
 
@@ -2108,8 +2339,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         String action = i.getAction();
         if (WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION.equals(action)) {
             int st = i.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1);
-            if (st != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
-                setStatus("Wi‑Fi mati. Nyalakan Wi‑Fi (tanpa internet)", DANGER);
+            if (st != WifiP2pManager.WIFI_P2P_STATE_ENABLED && lanPeers.isEmpty() && btPeers.isEmpty()) {
+                setStatus("Wi‑Fi mati. Nyalakan Wi‑Fi atau Bluetooth (tanpa internet)", DANGER);
             }
         } else if (WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION.equals(action)) {
             if (neededPermissions().length > 0) return;
@@ -2118,8 +2349,8 @@ public class MainActivity extends Activity implements Hub.Callback {
                     peers.clear();
                     peers.addAll(list.getDeviceList());
                     refreshPeers();
-                    if (hub == null && !peers.isEmpty()) {
-                        setStatus(peers.size() + " perangkat ditemukan", AMBER);
+                    if (hub == null && totalDiscoveredPeers() > 0) {
+                        setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
                     }
                 }
             });
@@ -2142,17 +2373,16 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void onConnection(WifiP2pInfo info) {
         if (info != null && info.groupFormed) {
+            p2pGroupActive = true;
             if (hub != null) return;
-            hub = new Hub(myName, myPhoto, this);
-            hub.sendPresence(buildPresence().encode());
-            ui.removeCallbacks(presenceTick);
-            ui.postDelayed(presenceTick, PRESENCE_EVERY_MS);
-            updateKeepAlive();
-            alertBanner.setVisibility(View.GONE);
-            applyAudioRoute();
-            isOwner = info.isGroupOwner;
+            hub = initHub(info.isGroupOwner);
             if (info.isGroupOwner) {
                 hub.startServer(info.groupOwnerAddress);
+                java.net.InetAddress lanIp = Lan.localIPv4();
+                if (lanIp != null && !lanIp.equals(info.groupOwnerAddress)) {
+                    hub.startServer(lanIp);
+                }
+                if (lan != null) lan.announce(myName, hub.port(), true);
                 shareJoinInfo(hub, info.groupOwnerAddress);
                 if (bridgeTo != null) joinUplink();
             } else {
@@ -2161,7 +2391,8 @@ public class MainActivity extends Activity implements Hub.Callback {
             }
             refreshAll();
             if (info.isGroupOwner) setStatus("Menunggu anggota bergabung", AMBER);
-        } else if (hub != null) {
+        } else if (hub != null && p2pGroupActive) {
+            p2pGroupActive = false;
             boolean hadMembers = !members.isEmpty();
             stopHub();
             refreshAll();
@@ -2320,6 +2551,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         members.clear();
         talkers.clear();
         presences.clear();
+        bleSosNames.clear();
         sosSilenced.clear();
         stopAlarm();
         audio.setMode(AudioManager.MODE_NORMAL);
@@ -2407,6 +2639,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 if (hub == null) return;
                 boolean isNew = !members.containsKey(name);
+                bleSosNames.remove(name);
                 members.put(name, photo);
                 refreshMembers();
                 refreshSos();

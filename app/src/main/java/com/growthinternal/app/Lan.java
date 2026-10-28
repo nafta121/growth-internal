@@ -1,0 +1,191 @@
+package com.growthinternal.app;
+
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.List;
+
+/**
+ * Zero-configuration UDP discovery on a shared mobile hotspot or local Wi-Fi router
+ * (no internet required). Announces this device on UDP port 8989 so nearby phones on
+ * the same LAN/Hotspot can join or form a Hub group over TCP port 8988.
+ */
+final class Lan {
+    static final int PORT = 8989;
+    private static final String MAGIC = "GI1";
+    private static final Charset UTF8 = Charset.forName("UTF-8");
+
+    static final class Peer {
+        final String name;
+        final InetAddress address;
+        final int port;
+        final boolean inGroup;
+
+        Peer(String name, InetAddress address, int port, boolean inGroup) {
+            this.name = name;
+            this.address = address;
+            this.port = port;
+            this.inGroup = inGroup;
+        }
+    }
+
+    interface Listener {
+        void onPeer(Peer peer);
+    }
+
+    private final Listener listener;
+    private volatile boolean stopped;
+    private volatile DatagramSocket socket;
+
+    Lan(Listener listener) {
+        this.listener = listener;
+    }
+
+    void start() {
+        stopped = false;
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    DatagramSocket s = new DatagramSocket(null);
+                    s.setReuseAddress(true);
+                    s.setBroadcast(true);
+                    s.bind(new InetSocketAddress(PORT));
+                    socket = s;
+                    byte[] buf = new byte[512];
+                    while (!stopped) {
+                        DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+                        s.receive(pkt);
+                        if (isLocalAddress(pkt.getAddress())) continue;
+                        Peer peer = decodePacket(pkt.getData(), pkt.getLength(), pkt.getAddress());
+                        if (peer != null && listener != null) {
+                            listener.onPeer(peer);
+                        }
+                    }
+                } catch (IOException ignored) {
+                }
+            }
+        }, "lan-udp");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    void announce(final String name, final int hubPort, final boolean inGroup) {
+        if (name == null || name.trim().isEmpty()) return;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                byte[] data = encodePacket(name, hubPort, inGroup);
+                DatagramSocket s = socket;
+                boolean tempSocket = false;
+                try {
+                    if (s == null || s.isClosed()) {
+                        s = new DatagramSocket();
+                        s.setBroadcast(true);
+                        tempSocket = true;
+                    }
+                    for (InetAddress bcast : broadcastAddresses()) {
+                        try {
+                            s.send(new DatagramPacket(data, data.length, bcast, PORT));
+                        } catch (IOException ignored) {
+                        }
+                    }
+                } catch (IOException ignored) {
+                } finally {
+                    if (tempSocket && s != null) s.close();
+                }
+            }
+        }, "lan-announce").start();
+    }
+
+    void stop() {
+        stopped = true;
+        DatagramSocket s = socket;
+        socket = null;
+        if (s != null) s.close();
+    }
+
+    static byte[] encodePacket(String name, int hubPort, boolean inGroup) {
+        String clean = name.replace('\n', ' ').trim();
+        String msg = MAGIC + "\n" + clean + "\n" + hubPort + "\n" + (inGroup ? "1" : "0");
+        return msg.getBytes(UTF8);
+    }
+
+    static Peer decodePacket(byte[] buf, int len, InetAddress sender) {
+        if (buf == null || len <= 0 || len > 512) return null;
+        String s = new String(buf, 0, len, UTF8);
+        String[] parts = s.split("\n");
+        if (parts.length < 4 || !MAGIC.equals(parts[0])) return null;
+        String name = parts[1].trim();
+        if (name.isEmpty()) return null;
+        int port;
+        try {
+            port = Integer.parseInt(parts[2].trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (port <= 0 || port > 65535) return null;
+        boolean inGroup = "1".equals(parts[3].trim());
+        return new Peer(name, sender, port, inGroup);
+    }
+
+    static boolean isLocalAddress(InetAddress addr) {
+        if (addr == null) return false;
+        if (addr.isLoopbackAddress()) return true;
+        try {
+            return NetworkInterface.getByInetAddress(addr) != null;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    static InetAddress localIPv4() {
+        InetAddress fallback = null;
+        try {
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            if (ifs == null) return null;
+            while (ifs.hasMoreElements()) {
+                NetworkInterface nif = ifs.nextElement();
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+                boolean isP2p = ifName.startsWith("p2p");
+                Enumeration<InetAddress> addrs = nif.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    InetAddress a = addrs.nextElement();
+                    if (a instanceof Inet4Address && !a.isLoopbackAddress()) {
+                        if (!isP2p) return a;
+                        if (fallback == null) fallback = a;
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return fallback;
+    }
+
+    private static List<InetAddress> broadcastAddresses() {
+        List<InetAddress> list = new ArrayList<InetAddress>();
+        try {
+            list.add(InetAddress.getByName("255.255.255.255"));
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            if (ifs != null) {
+                while (ifs.hasMoreElements()) {
+                    NetworkInterface nif = ifs.nextElement();
+                    if (!nif.isUp() || nif.isLoopback()) continue;
+                    for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
+                        InetAddress b = ia.getBroadcast();
+                        if (b != null && !list.contains(b)) list.add(b);
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return list;
+    }
+}

@@ -2,6 +2,22 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.13.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Arsitektur Multi-Transport Seamless Offline)
+- **Abstraksi Transport Agnistik & Kompresi Suara 4:1 IMA ADPCM (`Link`, `Hub`, `Adpcm`, `Frame`)**:
+  - Memisahkan `Link` dari ketergantungan eksklusif `java.net.Socket` menjadi berbasis `InputStream`, `OutputStream`, dan `Closeable` sehingga protokol `Frame` yang sama berjalan identik di atas Wi-Fi Direct TCP, Hotspot/LAN TCP, maupun Bluetooth Classic RFCOMM.
+  - Menambahkan codec suara **IMA ADPCM 4:1** (`Adpcm.java`, `Frame.AUDIO_ADPCM = 15`) yang secara transparan memampatkan aliran suara *Push-to-Talk* dari `256 kbps` (640 byte/20 ms) menjadi `64 kbps` (160 byte/20 ms) pada kanal *low-bandwidth* (Bluetooth RFCOMM) dan mendekodenya kembali di `Hub` untuk diteruskan lintas transport.
+- **Penemuan & Koneksi Otomatis Hotspot / Wi-Fi Lokal (`Lan`)**:
+  - Menambahkan penemuan perangkat *zero-configuration* melalui paket *broadcast* UDP port `8989` (`GI1`) pada jaringan Hotspot HP atau router Wi-Fi lokal tanpa internet, sehingga seluruh anggota Tim di satu Hotspot dapat langsung bergabung ke `Hub` TCP port `8988` tanpa dialog undangan sistem.
+- **Transport Bluetooth Classic RFCOMM (`Bt`)**:
+  - Menambahkan server & klien soket RFCOMM tanpa *pairing* paksa (`listenUsingInsecureRfcommWithServiceRecord` / `createInsecureRfcommSocketToServiceRecord`) agar HP Tim dapat saling berbicara (*Push-to-Talk*), berkirim teks, status, dan foto meskipun Wi-Fi Direct sedang sibuk atau tidak didukung perangkat.
+- **Beacon Darurat & Kehadiran via Bluetooth Low Energy (`Ble`)**:
+  - Menambahkan pemindaian dan pemancaran *Service Data* BLE 20-byte hemat daya yang membawa nama singkat, status `Presence` (termasuk **PRIORITAS/SOS**), persentase baterai, dan koordinat GPS (`lat`/`lon`) secara *connectionless*, sehingga sinyal **PRIORITAS** dari rekan Tim di sekitar langsung memicu dering peringatan, arah kompas, dan titik peta offline bahkan sebelum koneksi soket terbentuk.
+- **Jembatan Lintas Transport & Pengujian Otomatis (`MainActivity`, `AdpcmTest`)**:
+  - Menggabungkan daftar perangkat Wi-Fi Direct, Hotspot/Wi-Fi Lokal, dan Bluetooth dalam satu antarmuka terpadu di `MainActivity` serta memungkinkan pemilik grup (`Hub`) menjembatani anggota Wi-Fi Direct, Hotspot, dan Bluetooth dalam satu saluran pembicaraan yang sama.
+  - Menambahkan suite pengujian unit dan integrasi `AdpcmTest` untuk verifikasi *round-trip* codec ADPCM 4:1, pemaketan beacon BLE, paket penemuan LAN, dan *relay* lintas transport TCP <-> Bluetooth.
+
 ## [0.12.0] - 2026-10-28
 
 ### Diperbaiki & Dioptimalkan (Android Skills Audit)
