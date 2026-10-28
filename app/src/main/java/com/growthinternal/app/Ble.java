@@ -55,17 +55,23 @@ final class Ble {
         final boolean inGroup;
         final int rssi;
         final int psm;
+        final int clusterId;
 
         Beacon(String name, Presence presence, boolean inGroup, int rssi) {
-            this(name, presence, inGroup, rssi, 0);
+            this(name, presence, inGroup, rssi, 0, 0);
         }
 
         Beacon(String name, Presence presence, boolean inGroup, int rssi, int psm) {
+            this(name, presence, inGroup, rssi, psm, 0);
+        }
+
+        Beacon(String name, Presence presence, boolean inGroup, int rssi, int psm, int clusterId) {
             this.name = name;
             this.presence = presence;
             this.inGroup = inGroup;
             this.rssi = rssi;
             this.psm = psm;
+            this.clusterId = clusterId & 0xFFFF;
         }
     }
 
@@ -105,6 +111,7 @@ final class Ble {
     private Presence lastAdvPresence;
     private boolean lastAdvInGroup;
     private int lastAdvPsm;
+    private int lastAdvClusterId;
     private static final long WATCHDOG_MS = 25000L;
 
     private final Runnable watchdogRunnable = new Runnable() {
@@ -112,7 +119,7 @@ final class Ble {
             if (adapter != null && adapter.isEnabled()) {
                 if (!scanning) startScan();
                 if (!advertising && !meshAdvertising && lastAdvName != null) {
-                    updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm);
+                    updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm, lastAdvClusterId);
                 }
             }
             handler.postDelayed(this, WATCHDOG_MS);
@@ -141,7 +148,7 @@ final class Ble {
         @Override public void run() {
             stopMeshAdvertise();
             if (!advertising && lastAdvName != null) {
-                updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm);
+                updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm, lastAdvClusterId);
             }
         }
     };
@@ -228,14 +235,19 @@ final class Ble {
     }
 
     void updateAdvertise(String name, Presence p, boolean inGroup) {
-        updateAdvertise(name, p, inGroup, lastAdvPsm);
+        updateAdvertise(name, p, inGroup, lastAdvPsm, lastAdvClusterId);
     }
 
     void updateAdvertise(String name, Presence p, boolean inGroup, int psm) {
+        updateAdvertise(name, p, inGroup, psm, lastAdvClusterId);
+    }
+
+    void updateAdvertise(String name, Presence p, boolean inGroup, int psm, int clusterId) {
         lastAdvName = name;
         lastAdvPresence = p;
         lastAdvInGroup = inGroup;
         lastAdvPsm = psm;
+        lastAdvClusterId = clusterId & 0xFFFF;
         if (adapter == null || name == null || name.trim().isEmpty()) return;
         try {
             if (!adapter.isEnabled()) return;
@@ -245,7 +257,7 @@ final class Ble {
                 try { advertiser.stopAdvertising(advertiseCallback); } catch (RuntimeException ignored) {}
                 advertising = false;
             }
-            byte[] payload = pack(name, p != null ? p : new Presence(), inGroup, psm);
+            byte[] payload = pack(name, p != null ? p : new Presence(), inGroup, psm, lastAdvClusterId);
             boolean urgent = p != null && p.status == Presence.SOS;
             AdvertiseSettings settings = new AdvertiseSettings.Builder()
                     .setAdvertiseMode(urgent
@@ -346,20 +358,26 @@ final class Ble {
     }
 
     static byte[] pack(String name, Presence p) {
-        return pack(name, p, false, 0);
+        return pack(name, p, false, 0, 0);
     }
 
     static byte[] pack(String name, Presence p, boolean inGroup) {
-        return pack(name, p, inGroup, 0);
+        return pack(name, p, inGroup, 0, 0);
     }
 
     static byte[] pack(String name, Presence p, boolean inGroup, int psm) {
+        return pack(name, p, inGroup, psm, 0);
+    }
+
+    static byte[] pack(String name, Presence p, boolean inGroup, int psm, int clusterId) {
         Presence pr = p != null ? p : new Presence();
-        byte[] nameBytes = trimUtf8(name, MAX_NAME_BYTES);
         boolean hasPsm = psm > 0 && psm <= 0xFFFF;
-        int hdr = hasPsm ? HEADER_PSM_LEN : HEADER_LEN;
+        boolean hasCluster = (clusterId & 0xFFFF) != 0;
+        int hdr = (hasPsm ? HEADER_PSM_LEN : HEADER_LEN) + (hasCluster ? 2 : 0);
+        byte[] nameBytes = trimUtf8(name, hasCluster ? (MAX_NAME_BYTES - 2) : MAX_NAME_BYTES);
         ByteBuffer buf = ByteBuffer.allocate(hdr + nameBytes.length);
-        int flags = (pr.status & 0x0F)
+        int flags = (pr.status & 0x07)
+                | (hasCluster ? 0x08 : 0)
                 | (pr.hasLocation ? 0x10 : 0)
                 | (pr.charging ? 0x20 : 0)
                 | (inGroup ? 0x40 : 0)
@@ -369,6 +387,7 @@ final class Ble {
         buf.putFloat(pr.hasLocation ? (float) pr.lat : 0f);
         buf.putFloat(pr.hasLocation ? (float) pr.lon : 0f);
         if (hasPsm) buf.putShort((short) psm);
+        if (hasCluster) buf.putShort((short) clusterId);
         buf.put(nameBytes);
         return buf.array();
     }
@@ -381,17 +400,19 @@ final class Ble {
         if (data == null || data.length <= HEADER_LEN) return null;
         ByteBuffer buf = ByteBuffer.wrap(data);
         int flags = buf.get() & 0xFF;
+        boolean hasCluster = (flags & 0x08) != 0;
         boolean hasPsm = (flags & 0x80) != 0;
-        int hdr = hasPsm ? HEADER_PSM_LEN : HEADER_LEN;
+        int hdr = (hasPsm ? HEADER_PSM_LEN : HEADER_LEN) + (hasCluster ? 2 : 0);
         if (data.length <= hdr) return null;
         int battery = buf.get();
         float lat = buf.getFloat();
         float lon = buf.getFloat();
         int psm = hasPsm ? (buf.getShort() & 0xFFFF) : 0;
+        int clusterId = hasCluster ? (buf.getShort() & 0xFFFF) : 0;
         String name = new String(data, hdr, data.length - hdr, Hub.UTF8).trim();
         if (name.isEmpty()) return null;
         Presence p = new Presence();
-        p.status = flags & 0x0F;
+        p.status = flags & 0x07;
         p.hasLocation = (flags & 0x10) != 0;
         p.charging = (flags & 0x20) != 0;
         boolean inGroup = (flags & 0x40) != 0;
@@ -401,7 +422,7 @@ final class Ble {
             p.lon = lon;
             p.accuracy = 15f;
         }
-        return new Beacon(name, p, inGroup, rssi, psm);
+        return new Beacon(name, p, inGroup, rssi, psm, clusterId);
     }
 
     static byte[] packMeshPresence(Presence p) {

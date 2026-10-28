@@ -109,6 +109,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     private Handler ui;
 
     private Hub hub;
+    private Hub relayHub;
     // Multihop: how to reach our owner's group (from JOIN_INFO), and the group we bridge to.
     private byte[] upstreamInfo;
     private Bridge.Info bridgeTo;
@@ -273,11 +274,18 @@ public class MainActivity extends Activity implements Hub.Callback {
                     @Override public void run() { onBtIncoming(socket); }
                 });
             }
+            @Override public void onIncomingTunnel(final MeshAccess.Pipe pipe,
+                    final byte tunnelType, final int fmKeyId) {
+                ui.post(new Runnable() {
+                    @Override public void run() { onMeshAccessTunnel(pipe, tunnelType, fmKeyId); }
+                });
+            }
             @Override public void onL2capReady(final int psm) {
                 ui.post(new Runnable() {
                     @Override public void run() {
                         if (ble != null && neededPermissions().length == 0) {
-                            ble.updateAdvertise(myName, buildPresence(), activeGroupOwner(), psm);
+                            ble.updateAdvertise(myName, buildPresence(), activeGroupOwner(),
+                                    psm, activeClusterId());
                         }
                     }
                 });
@@ -378,6 +386,10 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (lan != null) lan.stop();
         if (bt != null) bt.stop();
         if (ble != null) ble.stop();
+        if (relayHub != null) {
+            relayHub.stop();
+            relayHub = null;
+        }
         stopHub();
         stopBridge();
         if (p2p != null) p2p.removeGroup(channel, null);
@@ -1501,23 +1513,30 @@ public class MainActivity extends Activity implements Hub.Callback {
         return hub == null ? 0 : members.size() + 1;
     }
 
+    private int activeClusterId() {
+        if (hub != null) return hub.clusterId();
+        if (relayHub != null) return relayHub.clusterId();
+        return 0;
+    }
+
     private void sendPresence() {
         Presence p = buildPresence();
         if (hub != null) hub.sendPresence(p.encode());
         int port = hub != null ? hub.port() : Hub.PORT;
         boolean ownerActive = activeGroupOwner();
         int count = groupMemberCount();
+        int cid = activeClusterId();
         if (ble != null && neededPermissions().length == 0) {
-            ble.updateAdvertise(myName, p, ownerActive, bt != null ? bt.l2capPsm() : 0);
+            ble.updateAdvertise(myName, p, ownerActive, bt != null ? bt.l2capPsm() : 0, cid);
             if (p.status == Presence.SOS) {
                 ble.broadcastMeshPresence(myName, p);
             }
         }
         if (aware != null && neededPermissions().length == 0) {
-            aware.updatePublish(myName, port, ownerActive, count);
+            aware.updatePublish(myName, port, ownerActive, count, cid);
         }
         if (lan != null) {
-            lan.announce(myName, port, ownerActive, count);
+            lan.announce(myName, port, ownerActive, count, cid);
         }
     }
 
@@ -2249,13 +2268,14 @@ public class MainActivity extends Activity implements Hub.Callback {
                 .putString("name", name)
                 .putString("photo", photo == null ? null : Base64.encodeToString(photo, Base64.NO_WRAP))
                 .apply();
+        int cid = activeClusterId();
         if (ble != null && neededPermissions().length == 0) {
             ble.updateAdvertise(myName, buildPresence(), activeGroupOwner(),
-                    bt != null ? bt.l2capPsm() : 0);
+                    bt != null ? bt.l2capPsm() : 0, cid);
         }
         if (aware != null && neededPermissions().length == 0) {
             aware.updatePublish(myName, hub != null ? hub.port() : Hub.PORT,
-                    activeGroupOwner(), groupMemberCount());
+                    activeGroupOwner(), groupMemberCount(), cid);
         }
         refreshAll();
         if (hub != null) toast("Nama/foto baru terlihat oleh anggota saat terhubung lagi");
@@ -2330,16 +2350,17 @@ public class MainActivity extends Activity implements Hub.Callback {
         int port = hub != null ? hub.port() : Hub.PORT;
         boolean ownerActive = activeGroupOwner();
         int count = groupMemberCount();
+        int cid = activeClusterId();
         if (bt != null) bt.startServer();
         if (ble != null) {
             ble.startScan();
-            ble.updateAdvertise(myName, buildPresence(), ownerActive, bt != null ? bt.l2capPsm() : 0);
+            ble.updateAdvertise(myName, buildPresence(), ownerActive, bt != null ? bt.l2capPsm() : 0, cid);
         }
         if (aware != null) {
-            aware.start(myName, port, ownerActive, count);
+            aware.start(myName, port, ownerActive, count, cid);
         }
         if (lan != null) {
-            lan.announce(myName, port, ownerActive, count);
+            lan.announce(myName, port, ownerActive, count, cid);
         }
         ui.removeCallbacks(presenceTick);
         ui.postDelayed(presenceTick, PRESENCE_EVERY_MS);
@@ -2367,17 +2388,42 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     /**
+     * Zero-Action Passive Relay Hub (BlueRange MeshAccessModule REMOTE_MESH / FM_KEY_ZERO):
+     * relays multi-hop frames in the background when the user is not in an active group.
+     */
+    private Hub ensureRelayHub() {
+        if (hub != null) return hub;
+        if (relayHub == null) {
+            relayHub = new Hub(myName + "#relay", null, Hub.NOOP_CALLBACK).asOwner(true);
+        }
+        return relayHub;
+    }
+
+    /**
      * Returns 1 to auto-join peer as client, 2 to auto-start owner hub for peer,
-     * or 0 to do nothing. Resolves split-brain by preferring larger groups and
-     * breaking ties deterministically by name.
+     * or 0 to do nothing. Resolves split-brain by preferring larger groups,
+     * breaking ties deterministically by name, and preventing loops via BlueRange ClusterId.
      */
     static int autoConnectDecision(boolean myInGroup, int myMemberCount, String myName,
             boolean peerInGroup, int peerMemberCount, String peerName) {
+        return autoConnectDecision(myInGroup, myMemberCount, myName, 0,
+                peerInGroup, peerMemberCount, peerName, 0);
+    }
+
+    static int autoConnectDecision(boolean myInGroup, int myMemberCount, String myName, int myClusterId,
+            boolean peerInGroup, int peerMemberCount, String peerName, int peerClusterId) {
         if (myName == null || peerName == null || myName.equals(peerName)) return 0;
+        // BlueRange ClusterId loop prevention: nodes in the same cluster are already connected multi-hop
+        if (myClusterId != 0 && myClusterId == peerClusterId) return 0;
         if (peerInGroup) {
             if (!myInGroup) return 1;
             if (myMemberCount <= 1) {
                 if (peerMemberCount > 1 || myName.compareTo(peerName) > 0) return 1;
+            } else if (myClusterId != 0 && peerClusterId != 0 && myClusterId != peerClusterId) {
+                if (peerMemberCount > myMemberCount
+                        || (peerMemberCount == myMemberCount && myClusterId > peerClusterId)) {
+                    return 1;
+                }
             }
             return 0;
         }
@@ -2407,13 +2453,14 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
         if (hub != null && hub.hasMember(peer.name)) return;
         int action = autoConnectDecision(hub != null && hub.hasPeers(), groupMemberCount(), myName,
-                peer.inGroup, peer.memberCount, peer.name);
+                activeClusterId(), peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
         if (action == 1 && canAutoConnect("aware:" + peer.name, peer.name)) {
             connectAware(peer);
         } else if (action == 2 && canAutoConnect("aware-own:" + peer.name, peer.name)) {
             ensureActiveHub();
             sendPresence();
-        } else if (!peer.inGroup && myName.compareTo(peer.name) > 0
+        } else if (!peer.inGroup && (activeClusterId() == 0 || activeClusterId() != peer.clusterId)
+                && myName.compareTo(peer.name) > 0
                 && canAutoConnect("aware:" + peer.name, peer.name)) {
             connectAware(peer);
         }
@@ -2444,11 +2491,11 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (hub != null && hub.hasMember(peer.name)) return;
         if (awarePeers.containsKey(peer.name)) return;
         if (activeGroupOwner() && !peer.inGroup && lan != null) {
-            lan.announce(myName, hub.port(), true, groupMemberCount());
+            lan.announce(myName, hub.port(), true, groupMemberCount(), activeClusterId());
             return;
         }
         int action = autoConnectDecision(hub != null && hub.hasPeers(), groupMemberCount(), myName,
-                peer.inGroup, peer.memberCount, peer.name);
+                activeClusterId(), peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
         if (action == 1 && canAutoConnect("lan:" + peer.name, peer.name)) {
             connectLan(peer);
         } else if (action == 2 && canAutoConnect("lan-own:" + peer.name, peer.name)) {
@@ -2457,8 +2504,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onBtIncoming(final android.bluetooth.BluetoothSocket socket) {
-        final Hub h = ensureActiveHub();
-        sendPresence();
+        final boolean passive = System.currentTimeMillis() < autoConnectPauseUntil;
+        final Hub h = passive ? ensureRelayHub() : ensureActiveHub();
+        if (!passive) sendPresence();
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
@@ -2470,6 +2518,23 @@ public class MainActivity extends Activity implements Hub.Callback {
         }, "bt-accept").start();
     }
 
+    private void onMeshAccessTunnel(final MeshAccess.Pipe pipe, final byte tunnelType, final int fmKeyId) {
+        if (pipe == null) return;
+        final boolean passive = fmKeyId == MeshAccess.FM_KEY_ZERO
+                || System.currentTimeMillis() < autoConnectPauseUntil;
+        final Hub h = passive ? ensureRelayHub() : ensureActiveHub();
+        if (!passive) sendPresence();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    h.addStreamLink(pipe.in, pipe.out, pipe, true);
+                } catch (java.io.IOException e) {
+                    try { pipe.close(); } catch (java.io.IOException ignored) {}
+                }
+            }
+        }, "ma-accept").start();
+    }
+
     private void onBleBeacon(Ble.Beacon beacon, android.bluetooth.BluetoothDevice device) {
         if (beacon == null || beacon.name.equals(myName)) return;
         if (device != null && device.getAddress() != null) {
@@ -2479,7 +2544,9 @@ public class MainActivity extends Activity implements Hub.Callback {
             refreshPeers();
         }
         updateMeshPeerState(beacon.name, beacon.presence, beacon.rssi >= Ble.MIN_AUTO_RSSI);
-        if (device != null && beacon.rssi >= Ble.MIN_AUTO_RSSI
+        int myCid = activeClusterId();
+        boolean sameCluster = myCid != 0 && myCid == beacon.clusterId;
+        if (device != null && !sameCluster && beacon.rssi >= Ble.MIN_AUTO_RSSI
                 && !awarePeers.containsKey(beacon.name)
                 && !lanPeers.containsKey(beacon.name)
                 && (hub == null || !hub.hasMember(beacon.name))) {

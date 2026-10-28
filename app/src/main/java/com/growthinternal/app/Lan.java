@@ -27,13 +27,19 @@ final class Lan {
         final int port;
         final boolean inGroup;
         final int memberCount;
+        final int clusterId;
 
         Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount) {
+            this(name, address, port, inGroup, memberCount, 0);
+        }
+
+        Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount, int clusterId) {
             this.name = name;
             this.address = address;
             this.port = port;
             this.inGroup = inGroup;
             this.memberCount = memberCount;
+            this.clusterId = clusterId & 0xFFFF;
         }
     }
 
@@ -78,10 +84,15 @@ final class Lan {
     }
 
     void announce(final String name, final int hubPort, final boolean inGroup, final int memberCount) {
+        announce(name, hubPort, inGroup, memberCount, 0);
+    }
+
+    void announce(final String name, final int hubPort, final boolean inGroup,
+            final int memberCount, final int clusterId) {
         if (name == null || name.trim().isEmpty()) return;
         new Thread(new Runnable() {
             @Override public void run() {
-                byte[] data = encodePacket(name, hubPort, inGroup, memberCount);
+                byte[] data = encodePacket(name, hubPort, inGroup, memberCount, clusterId);
                 DatagramSocket s = socket;
                 boolean tempSocket = false;
                 try {
@@ -112,9 +123,14 @@ final class Lan {
     }
 
     static byte[] encodePacket(String name, int hubPort, boolean inGroup, int memberCount) {
+        return encodePacket(name, hubPort, inGroup, memberCount, 0);
+    }
+
+    static byte[] encodePacket(String name, int hubPort, boolean inGroup, int memberCount, int clusterId) {
         String clean = name.replace('\n', ' ').trim();
         String msg = MAGIC + "\n" + clean + "\n" + hubPort + "\n"
-                + (inGroup ? "1" : "0") + "\n" + Math.max(0, memberCount);
+                + (inGroup ? "1" : "0") + "\n" + Math.max(0, memberCount)
+                + ((clusterId & 0xFFFF) != 0 ? "\n" + (clusterId & 0xFFFF) : "");
         return msg.getBytes(Hub.UTF8);
     }
 
@@ -137,7 +153,11 @@ final class Lan {
         if (parts.length >= 5) {
             try { count = Integer.parseInt(parts[4].trim()); } catch (NumberFormatException ignored) {}
         }
-        return new Peer(name, sender, port, inGroup, count);
+        int clusterId = 0;
+        if (parts.length >= 6) {
+            try { clusterId = Integer.parseInt(parts[5].trim()) & 0xFFFF; } catch (NumberFormatException ignored) {}
+        }
+        return new Peer(name, sender, port, inGroup, count, clusterId);
     }
 
     static boolean isLocalAddress(InetAddress addr) {

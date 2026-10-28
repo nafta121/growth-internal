@@ -30,19 +30,21 @@ final class Bt {
 
     interface Listener {
         void onIncoming(BluetoothSocket socket);
+        void onIncomingTunnel(MeshAccess.Pipe pipe, byte tunnelType, int fmKeyId);
         void onL2capReady(int psm);
     }
 
     private final Context ctx;
     private final Listener listener;
     private final BluetoothAdapter adapter;
+    private final MeshAccess meshAccess;
     private final List<BluetoothGatt> activeGatts = new CopyOnWriteArrayList<BluetoothGatt>();
     private volatile BluetoothServerSocket rfcommServer;
     private volatile BluetoothServerSocket l2capServer;
     private volatile int l2capPsm;
     private volatile boolean serverRunning;
 
-    Bt(Context ctx, Listener listener) {
+    Bt(Context ctx, final Listener listener) {
         this.ctx = ctx;
         this.listener = listener;
         BluetoothAdapter a = null;
@@ -51,6 +53,11 @@ final class Bt {
         } catch (RuntimeException ignored) {
         }
         this.adapter = a;
+        this.meshAccess = new MeshAccess(ctx, new MeshAccess.IncomingListener() {
+            @Override public void onIncomingTunnel(MeshAccess.Pipe pipe, byte tunnelType, int fmKeyId) {
+                if (listener != null) listener.onIncomingTunnel(pipe, tunnelType, fmKeyId);
+            }
+        });
     }
 
     boolean isAvailable() {
@@ -68,6 +75,7 @@ final class Bt {
     void startServer() {
         if (serverRunning || !isAvailable()) return;
         serverRunning = true;
+        meshAccess.startServer();
         if (Build.VERSION.SDK_INT >= 29) {
             Thread l2 = new Thread(new Runnable() {
                 @Override public void run() {
@@ -187,6 +195,13 @@ final class Bt {
                         }
                     }
                     if (sock == null) {
+                        MeshAccess.Pipe tunnel = meshAccess.openTunnel(
+                                device, MeshAccess.FM_KEY_NETWORK, MeshAccess.TUNNEL_REMOTE_MESH);
+                        if (tunnel != null) {
+                            hub.addStreamLink(tunnel.in, tunnel.out, tunnel, true);
+                            if (onConnected != null) onConnected.run();
+                            return;
+                        }
                         sock = device.createInsecureRfcommSocketToServiceRecord(SERVICE_UUID);
                         sock.connect();
                     }
@@ -206,6 +221,7 @@ final class Bt {
     void stopServer() {
         serverRunning = false;
         l2capPsm = 0;
+        meshAccess.stopServer();
         BluetoothServerSocket l2 = l2capServer;
         l2capServer = null;
         if (l2 != null) {

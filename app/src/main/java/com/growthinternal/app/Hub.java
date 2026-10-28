@@ -46,6 +46,24 @@ final class Hub implements Link.Listener {
     private static final int MAX_HISTORY = 32;
     static final Charset UTF8 = Charset.forName("UTF-8");
 
+    static final Callback NOOP_CALLBACK = new Callback() {
+        @Override public void onStatus(String message) {}
+        @Override public void onMemberJoined(String name, byte[] photo) {}
+        @Override public void onMemberLeft(String name) {}
+        @Override public void onText(String from, String text) {}
+        @Override public void onAudio(String from, byte[] pcm) {}
+        @Override public void onTalkState(String from, boolean talking) {}
+        @Override public void onPresence(String from, byte[] presence) {}
+        @Override public void onAnnouncement(String from, String text) {}
+        @Override public void onImage(String from, byte[] jpeg) {}
+        @Override public void onVoiceNote(String from, byte[] adpcm) {}
+        @Override public void onVideoIncoming(String from) {}
+        @Override public void onVideo(String from, byte[] mp4) {}
+        @Override public void onRejected(String reason) {}
+        @Override public void onJoinInfo(byte[] info) {}
+        @Override public void onUplink(boolean connected) {}
+    };
+
     private final Callback cb;
     private final List<Link> links = new CopyOnWriteArrayList<Link>();
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
@@ -63,11 +81,41 @@ final class Hub implements Link.Listener {
     private volatile Link uplink;
     private volatile byte[] joinInfo;
     private int port = PORT;
+    private volatile int clusterId;
+    private volatile int lossCounter;
 
     Hub(String myName, byte[] myPhoto, Callback cb) {
         this.myName = myName;
         this.myPhoto = myPhoto;
-        this.cb = cb;
+        this.cb = cb != null ? cb : NOOP_CALLBACK;
+        this.clusterId = computeClusterId(myName, 0);
+    }
+
+    static int computeClusterId(String name, int lossCount) {
+        int h = ((name != null ? name.hashCode() : 1) * 31) ^ (lossCount * 0x45D9F3B);
+        int cid = (h ^ (h >>> 16)) & 0xFFFF;
+        return cid == 0 ? 1 : cid;
+    }
+
+    int clusterId() { return clusterId; }
+
+    int lossCounter() { return lossCounter; }
+
+    int clusterSize() {
+        synchronized (members) { return members.size() + 1; }
+    }
+
+    static byte[] encodeClusterUpdate(int clusterId, int clusterSize) {
+        return new byte[] {
+            (byte) ((clusterId >>> 8) & 0xFF),
+            (byte) (clusterId & 0xFF),
+            (byte) ((clusterSize >>> 8) & 0xFF),
+            (byte) (clusterSize & 0xFF)
+        };
+    }
+
+    private Frame buildClusterFrame() {
+        return new Frame(Frame.CLUSTER_UPDATE, myName, encodeClusterUpdate(clusterId, clusterSize()));
     }
 
     boolean hasPeers() { return !links.isEmpty(); }
@@ -192,6 +240,7 @@ final class Hub implements Link.Listener {
                         // bridge before any phone behind us is introduced.
                         link.send(new Frame(Frame.HELLO, myName, myPhoto));
                         link.send(new Frame(Frame.BRIDGE, myName, null));
+                        link.send(buildClusterFrame());
                         byte[] p = myPresence;
                         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
                         uplink = link;
@@ -212,6 +261,7 @@ final class Hub implements Link.Listener {
         if (stopped) { s.close(); return; }
         Link link = new Link(s, this);
         link.send(new Frame(Frame.HELLO, myName, myPhoto));
+        link.send(buildClusterFrame());
         byte[] p = myPresence;
         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
         links.add(link);
@@ -223,6 +273,7 @@ final class Hub implements Link.Listener {
         if (stopped || links.size() >= MAX_LINKS) { raw.close(); return; }
         Link link = new Link(in, out, raw, lowBandwidth, this);
         link.send(new Frame(Frame.HELLO, myName, myPhoto));
+        link.send(buildClusterFrame());
         byte[] p = myPresence;
         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
         links.add(link);
@@ -341,8 +392,29 @@ final class Hub implements Link.Listener {
                 }
                 members.put(f.sender, f.payload);
             }
-            if (multiHop) broadcast(f, from);
+            if (multiHop) {
+                broadcast(f, from);
+                broadcast(buildClusterFrame(), null);
+            }
             cb.onMemberJoined(f.sender, f.payload);
+            return;
+        }
+        if (f.type == Frame.CLUSTER_UPDATE) {
+            if (f.payload != null && f.payload.length >= 4) {
+                int peerCid = ((f.payload[0] & 0xFF) << 8) | (f.payload[1] & 0xFF);
+                int peerSize = ((f.payload[2] & 0xFF) << 8) | (f.payload[3] & 0xFF);
+                if (peerCid != 0 && peerCid != clusterId) {
+                    int mySize = clusterSize();
+                    boolean adoptPeer = peerSize > mySize
+                            || (peerSize == mySize && peerCid < clusterId);
+                    if (adoptPeer) {
+                        clusterId = peerCid;
+                        broadcast(buildClusterFrame(), from);
+                    } else {
+                        from.send(buildClusterFrame());
+                    }
+                }
+            }
             return;
         }
         if (f.type == Frame.BRIDGE) {
@@ -416,8 +488,10 @@ final class Hub implements Link.Listener {
         boolean wasUplink = link == uplink;
         if (wasUplink) uplink = null;
         if (stopped) return;
+        lossCounter++;
         if (wasUplink) cb.onUplink(false);
         if (link.peerName == null) {
+            if (links.isEmpty()) clusterId = computeClusterId(myName, lossCounter);
             if (!owner && links.isEmpty()) cb.onRejected("Koneksi ke pemilik grup terputus");
             return;
         }
@@ -426,6 +500,12 @@ final class Hub implements Link.Listener {
                 broadcast(new Frame(Frame.LEAVE, name, null), null);
             }
             removeMember(name);
+        }
+        if (wasUplink || link.relay || links.isEmpty()) {
+            clusterId = computeClusterId(myName, lossCounter);
+        }
+        if (!links.isEmpty()) {
+            broadcast(buildClusterFrame(), null);
         }
     }
 

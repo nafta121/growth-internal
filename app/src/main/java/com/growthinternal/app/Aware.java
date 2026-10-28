@@ -46,15 +46,22 @@ final class Aware {
         final int port;
         final boolean inGroup;
         final int memberCount;
+        final int clusterId;
         final PeerHandle handle;
         final DiscoverySession session;
 
         Peer(String name, int port, boolean inGroup, int memberCount,
                 PeerHandle handle, DiscoverySession session) {
+            this(name, port, inGroup, memberCount, 0, handle, session);
+        }
+
+        Peer(String name, int port, boolean inGroup, int memberCount, int clusterId,
+                PeerHandle handle, DiscoverySession session) {
             this.name = name;
             this.port = port;
             this.inGroup = inGroup;
             this.memberCount = memberCount;
+            this.clusterId = clusterId & 0xFFFF;
             this.handle = handle;
             this.session = session;
         }
@@ -85,6 +92,7 @@ final class Aware {
     private int lastPort = Hub.PORT;
     private boolean lastInGroup;
     private int lastCount;
+    private int lastClusterId;
 
     Aware(Context ctx, Listener listener) {
         this.ctx = ctx.getApplicationContext();
@@ -118,13 +126,18 @@ final class Aware {
     }
 
     void start(String name, int port, boolean inGroup, int memberCount) {
+        start(name, port, inGroup, memberCount, 0);
+    }
+
+    void start(String name, int port, boolean inGroup, int memberCount, int clusterId) {
         lastName = name != null ? name : "";
         lastPort = port;
         lastInGroup = inGroup;
         lastCount = memberCount;
+        lastClusterId = clusterId & 0xFFFF;
         if (!isAvailable()) return;
         if (awareSession != null) {
-            updatePublish(lastName, lastPort, lastInGroup, lastCount);
+            updatePublish(lastName, lastPort, lastInGroup, lastCount, lastClusterId);
             return;
         }
         if (attaching) return;
@@ -146,15 +159,21 @@ final class Aware {
     }
 
     void updatePublish(String name, int port, boolean inGroup, int memberCount) {
+        updatePublish(name, port, inGroup, memberCount, lastClusterId);
+    }
+
+    void updatePublish(String name, int port, boolean inGroup, int memberCount, int clusterId) {
         lastName = name != null ? name : "";
         lastPort = port;
         lastInGroup = inGroup;
         lastCount = memberCount;
+        lastClusterId = clusterId & 0xFFFF;
         if (publishSession == null || lastName.isEmpty()) return;
         try {
             PublishConfig cfg = new PublishConfig.Builder()
                     .setServiceName(SERVICE_NAME)
-                    .setServiceSpecificInfo(Lan.encodePacket(lastName, lastPort, lastInGroup, lastCount))
+                    .setServiceSpecificInfo(Lan.encodePacket(
+                            lastName, lastPort, lastInGroup, lastCount, lastClusterId))
                     .build();
             publishSession.updatePublish(cfg);
         } catch (RuntimeException ignored) {
@@ -166,7 +185,8 @@ final class Aware {
         try {
             PublishConfig pubCfg = new PublishConfig.Builder()
                     .setServiceName(SERVICE_NAME)
-                    .setServiceSpecificInfo(Lan.encodePacket(lastName, lastPort, lastInGroup, lastCount))
+                    .setServiceSpecificInfo(Lan.encodePacket(
+                            lastName, lastPort, lastInGroup, lastCount, lastClusterId))
                     .build();
             awareSession.publish(pubCfg, new DiscoverySessionCallback() {
                 @Override public void onPublishStarted(PublishDiscoverySession session) {
@@ -195,7 +215,7 @@ final class Aware {
                     Lan.Peer lp = Lan.decodePacket(serviceSpecificInfo, serviceSpecificInfo.length, null);
                     if (lp != null && listener != null) {
                         listener.onPeer(new Peer(lp.name, lp.port, lp.inGroup, lp.memberCount,
-                                peerHandle, subscribeSession));
+                                lp.clusterId, peerHandle, subscribeSession));
                     }
                 }
                 @Override public void onMessageReceived(PeerHandle peerHandle, byte[] message) {

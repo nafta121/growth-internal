@@ -387,4 +387,161 @@ public class AdpcmTest {
             s.close();
         }
     }
+
+    @Test public void meshAccessFourWayHandshakeEncryptionDeadDataAndPacketSplitting() {
+        MeshAccess.Session central = new MeshAccess.Session(
+                true, (short) 101, MeshAccess.FM_KEY_NETWORK, MeshAccess.TUNNEL_REMOTE_MESH);
+        MeshAccess.Session periph = new MeshAccess.Session(
+                false, (short) 202, MeshAccess.FM_KEY_ZERO, MeshAccess.TUNNEL_PEER_TO_PEER);
+
+        // 1. 4-Way Handshake: START -> ANONCE -> SNONCE (encrypted+MIC) -> DONE (encrypted+MIC)
+        byte[] startPkt = central.startHandshake();
+        assertEquals(MeshAccess.STATE_WAITING_FOR_ANONCE, central.state);
+
+        byte[] aNoncePkt = periph.onHandshakePacket(startPkt);
+        assertNotNull(aNoncePkt);
+        assertEquals(MeshAccess.STATE_WAITING_FOR_SNONCE, periph.state);
+        assertEquals(MeshAccess.FM_KEY_NETWORK, periph.fmKeyId);
+        assertEquals(MeshAccess.TUNNEL_REMOTE_MESH, periph.tunnelType);
+
+        byte[] sNoncePkt = central.onHandshakePacket(aNoncePkt);
+        assertNotNull(sNoncePkt);
+        assertEquals(MeshAccess.STATE_WAITING_FOR_DONE, central.state);
+
+        byte[] donePkt = periph.onHandshakePacket(sNoncePkt);
+        assertNotNull(donePkt);
+        assertEquals(MeshAccess.STATE_ENCRYPTED, periph.state);
+
+        byte[] afterDone = central.onHandshakePacket(donePkt);
+        assertNull(afterDone);
+        assertEquals(MeshAccess.STATE_ENCRYPTED, central.state);
+
+        // 2. Packet splitting & encrypted transfer + 4-byte MIC verification
+        byte[] message = "Instruksi rotasi Pos 1 ke Pos 4 via BlueRange MeshAccess".getBytes(Hub.UTF8);
+        byte[][] chunks = MeshAccess.Session.splitPayload(message, 20);
+        assertTrue("Message must be split into multiple BLE MTU chunks", chunks.length > 3);
+
+        byte[] reassembled = null;
+        for (byte[] chunk : chunks) {
+            byte[] encrypted = central.encryptPacket(chunk);
+            assertNotNull(encrypted);
+            assertEquals(chunk.length + MeshAccess.MIC_LEN, encrypted.length);
+            byte[] decrypted = periph.decryptPacket(encrypted);
+            assertNotNull(decrypted);
+            reassembled = periph.reassembleChunk(decrypted);
+        }
+        assertNotNull(reassembled);
+        assertEquals("Instruksi rotasi Pos 1 ke Pos 4 via BlueRange MeshAccess",
+                new String(reassembled, Hub.UTF8));
+
+        // 3. Corrupted packet triggers MIC rejection -> DEAD_DATA magic + forward window resync
+        byte[] corrupted = central.encryptPacket(new byte[] { 1, 2, 3, 4 });
+        corrupted[0] ^= (byte) 0xFF;
+        assertNull("Tampered ciphertext must fail MIC check", periph.decryptPacket(corrupted));
+        byte[] deadData = periph.buildDeadDataPacket();
+        assertTrue(MeshAccess.Session.isDeadDataPacket(deadData));
+
+        // Next valid packet resynchronizes sequence counter within forward window automatically
+        byte[] nextValid = central.encryptPacket("ResyncOK".getBytes(Hub.UTF8));
+        byte[] recovered = periph.decryptPacket(nextValid);
+        assertNotNull("Next valid packet must resync and decrypt cleanly", recovered);
+        assertEquals("ResyncOK", new String(recovered, Hub.UTF8));
+    }
+
+    @Test public void zeroActionPassiveRelayOverEncryptedMeshAccessPipesAndClusterIdAntiLoop() throws Exception {
+        HubTest.Rec rA = new HubTest.Rec();
+        HubTest.Rec rC = new HubTest.Rec();
+
+        Hub hubA = new Hub("Pos 1", null, rA).asOwner(true);
+        // Untouched standby device running a Zero-Action Passive Relay Hub (NOOP_CALLBACK)
+        Hub passiveRelay = new Hub("Standby#relay", null, Hub.NOOP_CALLBACK).asOwner(true);
+        Hub hubC = new Hub("Pos 3", null, rC).asOwner(false);
+
+        int initialCidA = hubA.clusterId();
+        int initialCidC = hubC.clusterId();
+        assertTrue(initialCidA != 0 && initialCidC != 0);
+
+        // Connect Pos 1 <---> Passive Relay via encrypted MeshAccess Pipe (FM_KEY_ZERO blind relay)
+        MeshAccess.Pipe[] linkAB = createPairedMeshAccessPipes(MeshAccess.FM_KEY_ZERO);
+        hubA.addStreamLink(linkAB[0].in, linkAB[0].out, linkAB[0], true);
+        passiveRelay.addStreamLink(linkAB[1].in, linkAB[1].out, linkAB[1], true);
+
+        // Connect Passive Relay <---> Pos 3 via encrypted MeshAccess Pipe
+        MeshAccess.Pipe[] linkBC = createPairedMeshAccessPipes(MeshAccess.FM_KEY_ZERO);
+        passiveRelay.addStreamLink(linkBC[0].in, linkBC[0].out, linkBC[0], true);
+        hubC.addStreamLink(linkBC[1].in, linkBC[1].out, linkBC[1], true);
+
+        // Pos 1 and Pos 3 discover each other through the passive relay and exchange chat + ADPCM voice!
+        HubTest.waitFor(rA, "join:Pos 3");
+        HubTest.waitFor(rC, "join:Pos 1");
+
+        hubC.sendText("Laporan dari Pos 3 lewat Passive Relay");
+        HubTest.waitFor(rA, "text:Pos 3:Laporan dari Pos 3 lewat Passive Relay");
+
+        hubA.sendAudio(new byte[640]);
+        HubTest.waitFor(rC, "audio:Pos 1:640");
+
+        // Wait briefly for CLUSTER_UPDATE frames to converge across the 3-node tree
+        for (int i = 0; i < 20 && (hubA.clusterId() != hubC.clusterId()); i++) {
+            Thread.sleep(50);
+        }
+        assertEquals("All nodes in the connected tree must converge to one BlueRange ClusterId",
+                hubA.clusterId(), hubC.clusterId());
+        assertEquals(hubA.clusterId(), passiveRelay.clusterId());
+
+        // ClusterId anti-loop: autoConnectDecision returns 0 when two nodes share the same ClusterId!
+        int convergedCid = hubA.clusterId();
+        assertEquals(0, MainActivity.autoConnectDecision(
+                true, 3, "Pos 1", convergedCid, true, 3, "Pos 3", convergedCid));
+
+        // BLE Beacon & LAN discovery packets preserve ClusterId within the 22-byte BLE limit
+        Presence p = new Presence();
+        p.status = Presence.SAFE;
+        p.battery = 80;
+        byte[] bleRaw = Ble.pack("Pos 1", p, true, 0x0085, convergedCid);
+        assertTrue("BLE beacon with PSM + ClusterId must fit in 22 bytes", bleRaw.length <= 22);
+        Ble.Beacon unpackedBle = Ble.unpack(bleRaw, -60);
+        assertNotNull(unpackedBle);
+        assertEquals(convergedCid, unpackedBle.clusterId);
+        assertEquals(0x0085, unpackedBle.psm);
+
+        byte[] lanRaw = Lan.encodePacket("Pos 1", 8988, true, 3, convergedCid);
+        Lan.Peer unpackedLan = Lan.decodePacket(lanRaw, lanRaw.length, InetAddress.getByName("192.168.43.1"));
+        assertNotNull(unpackedLan);
+        assertEquals(convergedCid, unpackedLan.clusterId);
+
+        // Self-healing: when passiveRelay stops, lossCounter increments and ClusterId regenerates
+        passiveRelay.stop();
+        for (int i = 0; i < 20 && hubC.lossCounter() == 0; i++) {
+            Thread.sleep(50);
+        }
+        assertTrue("Disconnection must increment lossCounter for self-healing", hubC.lossCounter() > 0);
+
+        hubC.stop();
+        hubA.stop();
+    }
+
+    private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
+        MeshAccess.Session sCentral = new MeshAccess.Session(
+                true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);
+        MeshAccess.Session sPeriph = new MeshAccess.Session(
+                false, (short) 22, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);
+        final MeshAccess.Pipe[] pair = new MeshAccess.Pipe[2];
+        pair[0] = new MeshAccess.Pipe(sCentral, new MeshAccess.PacketSender() {
+            @Override public void sendPacket(byte[] packet) {
+                if (pair[1] != null) pair[1].onIncomingPacket(packet, null);
+            }
+        }, null);
+        pair[1] = new MeshAccess.Pipe(sPeriph, new MeshAccess.PacketSender() {
+            @Override public void sendPacket(byte[] packet) {
+                if (pair[0] != null) pair[0].onIncomingPacket(packet, null);
+            }
+        }, null);
+        pair[0].setMtuPayload(27);
+        pair[1].setMtuPayload(27);
+        pair[1].onIncomingPacket(sCentral.startHandshake(), null);
+        assertEquals(MeshAccess.STATE_ENCRYPTED, sCentral.state);
+        assertEquals(MeshAccess.STATE_ENCRYPTED, sPeriph.state);
+        return pair;
+    }
 }

@@ -18,6 +18,7 @@ final class Frame {
     static final byte JOIN_INFO = 14;  // owner -> direct member: how to reach this group as a bridge
     static final byte AUDIO_ADPCM = 15; // 4-bit IMA ADPCM audio for low-bandwidth Bluetooth links
     static final byte VOICE_NOTE = 16;  // 4-bit IMA ADPCM recorded voice note (store-and-forward)
+    static final byte CLUSTER_UPDATE = 17; // BlueRange CLUSTER_INFO_UPDATE: 16-bit clusterId + 16-bit clusterSize
 
     /** Largest payload accepted per type, so a bad peer cannot exhaust memory. */
     static int maxPayload(byte type) {
@@ -33,6 +34,7 @@ final class Frame {
             case IMAGE: return Photos.MAX_BYTES; // one compressed JPEG
             case VIDEO_CHUNK: return Clips.HEADER + Clips.CHUNK;
             case JOIN_INFO: return 512;
+            case CLUSTER_UPDATE: return 16;
             default: return 0;
         }
     }
