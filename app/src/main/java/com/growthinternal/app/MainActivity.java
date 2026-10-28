@@ -135,7 +135,11 @@ public class MainActivity extends Activity implements Hub.Callback {
             new LinkedHashMap<String, android.bluetooth.BluetoothDevice>();
     private final Map<String, String> btNames = new LinkedHashMap<String, String>();
     private final Map<String, Integer> btPsms = new HashMap<String, Integer>();
-    private final Map<String, Long> recentMeshTexts = new HashMap<String, Long>();
+    private final Map<String, Long> recentMeshTexts = new LinkedHashMap<String, Long>() {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+            return size() > 256;
+        }
+    };
     private final Set<String> bleSosNames = new HashSet<String>();
     private final Map<String, Presence> presences = new HashMap<String, Presence>();
     private final Set<String> sosSilenced = new HashSet<String>();
@@ -3092,20 +3096,26 @@ public class MainActivity extends Activity implements Hub.Callback {
         });
     }
 
-    @Override public void onVideo(final String from, byte[] clip) {
-        final java.io.File f;
-        try {
-            f = saveClip(clip);
-        } catch (java.io.IOException e) {
-            return;
-        }
-        final Bitmap thumb = videoThumb(f);
-        ui.post(new Runnable() {
+    @Override public void onVideo(final String from, final byte[] clip) {
+        Runnable save = new Runnable() {
             @Override public void run() {
-                addVideoBubble(from, f, thumb, false);
-                notifyAway(Alerts.CH_MESSAGES, from, "Mengirim video");
+                final java.io.File f;
+                try {
+                    f = saveClip(clip);
+                } catch (java.io.IOException e) {
+                    return;
+                }
+                final Bitmap thumb = videoThumb(f);
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        addVideoBubble(from, f, thumb, false);
+                        notifyAway(Alerts.CH_MESSAGES, from, "Mengirim video");
+                    }
+                });
             }
-        });
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) save.run();
+        else new Thread(save, "video-save").start();
     }
 
     @Override public void onText(final String from, final String text) {

@@ -1,6 +1,7 @@
 build/
 *.apk
 *.keystore
+!debug.keystore
 *.jks
 .gradle/
 tools/screenshot-tests/out/

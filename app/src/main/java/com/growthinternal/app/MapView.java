@@ -17,9 +17,13 @@ import android.view.View;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 /**
  * Street map drawn from tiles saved on the phone, with every member who shares a
@@ -28,6 +32,13 @@ import java.util.Set;
  */
 final class MapView extends View {
     private static final double MAX_VIEW_ZOOM = 18;
+    private static final ExecutorService LOADER = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        @Override public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "tile-loader");
+            t.setDaemon(true);
+            return t;
+        }
+    });
 
     private final File root;
     private final float density;
@@ -37,7 +48,8 @@ final class MapView extends View {
     private final Rect src = new Rect();
     private final RectF dst = new RectF();
     private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(120);
-    private final Set<String> missing = new HashSet<String>();
+    private final Set<String> missing = Collections.synchronizedSet(new HashSet<String>());
+    private final Set<String> loading = Collections.synchronizedSet(new HashSet<String>());
     private final ScaleGestureDetector scaler;
     private final GestureDetector gestures;
 
@@ -164,8 +176,30 @@ final class MapView extends View {
 
     /** Draws the tile, or the part of the nearest saved coarser tile that covers it. */
     private void drawTile(Canvas c, int z, int x, int y, RectF dst) {
+        boolean async = c.isHardwareAccelerated();
         for (int k = 0; k <= 4 && z - k >= Tiles.MIN_ZOOM; k++) {
-            Bitmap b = load(z - k, x >> k, y >> k);
+            int tz = z - k, tx = x >> k, ty = y >> k;
+            String key = tz + "/" + tx + "/" + ty;
+            Bitmap b = cache.get(key);
+            if (b == null && !missing.contains(key)) {
+                if (!async) {
+                    b = decodeTile(key, tz, tx, ty);
+                } else if (k == 0 && loading.add(key)) {
+                    LOADER.execute(new Runnable() {
+                        @Override public void run() {
+                            for (int d = 0; d <= 4 && z - d >= Tiles.MIN_ZOOM; d++) {
+                                int dz = z - d, dx = x >> d, dy = y >> d;
+                                String dk = dz + "/" + dx + "/" + dy;
+                                if (cache.get(dk) != null) break;
+                                if (!missing.contains(dk) && decodeTile(dk, dz, dx, dy) != null) {
+                                    postInvalidate();
+                                    break;
+                                }
+                            }
+                        }
+                    });
+                }
+            }
             if (b == null) continue;
             int part = Tiles.SIZE >> k;
             int sx = (x & ((1 << k) - 1)) * part, sy = (y & ((1 << k) - 1)) * part;
@@ -176,14 +210,12 @@ final class MapView extends View {
         }
     }
 
-    private Bitmap load(int z, int x, int y) {
-        String key = z + "/" + x + "/" + y;
-        Bitmap b = cache.get(key);
-        if (b != null || missing.contains(key)) return b;
+    private Bitmap decodeTile(String key, int z, int x, int y) {
         File f = Tiles.file(root, z, x, y);
-        b = f.exists() ? BitmapFactory.decodeFile(f.getPath()) : null;
+        Bitmap b = f.exists() ? BitmapFactory.decodeFile(f.getPath()) : null;
         if (b == null) missing.add(key);
         else cache.put(key, b);
+        loading.remove(key);
         return b;
     }
 

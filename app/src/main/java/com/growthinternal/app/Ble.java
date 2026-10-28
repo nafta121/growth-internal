@@ -16,7 +16,6 @@ import android.os.Looper;
 import android.os.ParcelUuid;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Random;
@@ -43,7 +42,6 @@ final class Ble {
     static final byte MESH_ANNOUNCE = 3;
     static final int DEFAULT_TTL = 5;
 
-    private static final Charset UTF8 = Charset.forName("UTF-8");
     private static final int HEADER_LEN = 10;
     private static final int HEADER_PSM_LEN = 12;
     private static final int MAX_NAME_BYTES = 10;
@@ -337,7 +335,7 @@ final class Ble {
     }
 
     private static byte[] trimUtf8(String s, int maxBytes) {
-        byte[] raw = (s != null ? s.trim() : "").getBytes(UTF8);
+        byte[] raw = (s != null ? s.trim() : "").getBytes(Hub.UTF8);
         int len = Math.min(raw.length, maxBytes);
         if (len < raw.length && (raw[len] & 0xC0) == 0x80) {
             while (len > 0 && (raw[len] & 0xC0) == 0x80) len--;
@@ -390,7 +388,7 @@ final class Ble {
         float lat = buf.getFloat();
         float lon = buf.getFloat();
         int psm = hasPsm ? (buf.getShort() & 0xFFFF) : 0;
-        String name = new String(data, hdr, data.length - hdr, UTF8).trim();
+        String name = new String(data, hdr, data.length - hdr, Hub.UTF8).trim();
         if (name.isEmpty()) return null;
         Presence p = new Presence();
         p.status = flags & 0x0F;
@@ -465,7 +463,7 @@ final class Ble {
         int msgId = buf.getShort() & 0xFFFF;
         int senderLen = buf.get() & 0xFF;
         if (senderLen <= 0 || 4 + senderLen > data.length) return null;
-        String sender = new String(data, 4, senderLen, UTF8).trim();
+        String sender = new String(data, 4, senderLen, Hub.UTF8).trim();
         if (sender.isEmpty()) return null;
         int bodyLen = data.length - 4 - senderLen;
         byte[] body = new byte[bodyLen];

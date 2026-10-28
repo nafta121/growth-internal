@@ -27,7 +27,6 @@ import android.os.Looper;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -41,7 +40,6 @@ final class Aware {
     static final String SERVICE_NAME = "growthinternal";
     private static final int TRANSPORT_WIFI_AWARE = 5;
     private static final String PASS = "GrowthInternalAware2026";
-    private static final Charset UTF8 = Charset.forName("UTF-8");
 
     static final class Peer {
         final String name;
@@ -74,6 +72,10 @@ final class Aware {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<ConnectivityManager.NetworkCallback> netCallbacks =
             new ArrayList<ConnectivityManager.NetworkCallback>();
+    private final java.util.Map<PeerHandle, Peer> pendingPeers =
+            new java.util.concurrent.ConcurrentHashMap<PeerHandle, Peer>();
+    private final java.util.Map<PeerHandle, Network> clientNets =
+            new java.util.concurrent.ConcurrentHashMap<PeerHandle, Network>();
     private WifiAwareManager mgr;
     private WifiAwareSession awareSession;
     private PublishDiscoverySession publishSession;
@@ -83,9 +85,6 @@ final class Aware {
     private int lastPort = Hub.PORT;
     private boolean lastInGroup;
     private int lastCount;
-    private volatile Network activeClientNet;
-    private volatile Peer activeClientPeer;
-    private volatile boolean activeClientDelivered;
 
     Aware(Context ctx, Listener listener) {
         this.ctx = ctx.getApplicationContext();
@@ -175,7 +174,7 @@ final class Aware {
                 }
                 @Override public void onMessageReceived(PeerHandle peerHandle, byte[] message) {
                     if (message == null || publishSession == null) return;
-                    String s = new String(message, UTF8);
+                    String s = new String(message, Hub.UTF8);
                     if ("JOIN".equals(s)) {
                         if (listener != null) listener.onResponderRequested();
                         openDataPath(publishSession, peerHandle, false, null);
@@ -200,11 +199,11 @@ final class Aware {
                     }
                 }
                 @Override public void onMessageReceived(PeerHandle peerHandle, byte[] message) {
-                    if (message == null) return;
-                    String s = new String(message, UTF8);
+                    if (message == null || peerHandle == null) return;
+                    String s = new String(message, Hub.UTF8);
                     if (s.startsWith("IPV6:")) {
                         String host = s.substring(5).trim();
-                        deliverFromIpv6String(host);
+                        deliverFromIpv6String(peerHandle, host);
                     }
                 }
             }, handler);
@@ -214,10 +213,9 @@ final class Aware {
 
     void connect(Peer peer) {
         if (peer == null || peer.session == null || peer.handle == null) return;
-        activeClientPeer = peer;
-        activeClientDelivered = false;
+        pendingPeers.put(peer.handle, peer);
         try {
-            peer.session.sendMessage(peer.handle, 1, "JOIN".getBytes(UTF8));
+            peer.session.sendMessage(peer.handle, 1, "JOIN".getBytes(Hub.UTF8));
         } catch (RuntimeException ignored) {
         }
         openDataPath(peer.session, peer.handle, true, peer);
@@ -245,14 +243,16 @@ final class Aware {
                     .invoke(rb, spec);
 
             ConnectivityManager.NetworkCallback cb = new ConnectivityManager.NetworkCallback() {
+                private boolean delivered;
+
                 @Override public void onAvailable(Network network) {
                     if (isClient) {
-                        activeClientNet = network;
+                        if (handle != null && network != null) clientNets.put(handle, network);
                     } else {
                         String ipv6 = localLinkIpv6(network);
                         if (ipv6 != null) {
                             try {
-                                session.sendMessage(handle, 2, ("IPV6:" + ipv6).getBytes(UTF8));
+                                session.sendMessage(handle, 2, ("IPV6:" + ipv6).getBytes(Hub.UTF8));
                             } catch (RuntimeException ignored) {
                             }
                         }
@@ -260,7 +260,7 @@ final class Aware {
                 }
 
                 @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities nc) {
-                    if (!isClient || activeClientDelivered || peer == null || Build.VERSION.SDK_INT < 29) return;
+                    if (!isClient || delivered || peer == null || Build.VERSION.SDK_INT < 29) return;
                     try {
                         Object ti = NetworkCapabilities.class.getMethod("getTransportInfo").invoke(nc);
                         if (ti instanceof WifiAwareNetworkInfo) {
@@ -268,7 +268,9 @@ final class Aware {
                             Inet6Address addr = info.getPeerIpv6Addr();
                             int p = info.getPort() > 0 ? info.getPort() : peer.port;
                             if (addr != null) {
-                                activeClientDelivered = true;
+                                delivered = true;
+                                pendingPeers.remove(handle);
+                                clientNets.remove(handle);
                                 if (listener != null) listener.onTargetReady(peer.name, addr, p);
                             }
                         }
@@ -284,10 +286,10 @@ final class Aware {
         }
     }
 
-    private void deliverFromIpv6String(String ipv6) {
-        Peer peer = activeClientPeer;
-        Network net = activeClientNet;
-        if (activeClientDelivered || peer == null || net == null || ipv6.isEmpty()) return;
+    private void deliverFromIpv6String(PeerHandle peerHandle, String ipv6) {
+        Peer peer = pendingPeers.remove(peerHandle);
+        Network net = clientNets.remove(peerHandle);
+        if (peer == null || net == null || ipv6.isEmpty()) return;
         try {
             LinkProperties lp = cm.getLinkProperties(net);
             if (lp == null || lp.getInterfaceName() == null) return;
@@ -295,7 +297,6 @@ final class Aware {
             if (ni == null) return;
             byte[] raw = InetAddress.getByName(ipv6).getAddress();
             Inet6Address scoped = Inet6Address.getByAddress(null, raw, ni);
-            activeClientDelivered = true;
             if (listener != null) listener.onTargetReady(peer.name, scoped, peer.port);
         } catch (Exception ignored) {
         }
@@ -318,6 +319,8 @@ final class Aware {
     }
 
     void stop() {
+        pendingPeers.clear();
+        clientNets.clear();
         synchronized (netCallbacks) {
             for (ConnectivityManager.NetworkCallback cb : netCallbacks) {
                 try { cm.unregisterNetworkCallback(cb); } catch (RuntimeException ignored) {}

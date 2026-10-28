@@ -8,7 +8,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
@@ -21,7 +20,6 @@ import java.util.List;
 final class Lan {
     static final int PORT = 8989;
     private static final String MAGIC = "GI1";
-    private static final Charset UTF8 = Charset.forName("UTF-8");
 
     static final class Peer {
         final String name;
@@ -29,10 +27,6 @@ final class Lan {
         final int port;
         final boolean inGroup;
         final int memberCount;
-
-        Peer(String name, InetAddress address, int port, boolean inGroup) {
-            this(name, address, port, inGroup, inGroup ? 1 : 0);
-        }
 
         Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount) {
             this.name = name;
@@ -83,10 +77,6 @@ final class Lan {
         t.start();
     }
 
-    void announce(final String name, final int hubPort, final boolean inGroup) {
-        announce(name, hubPort, inGroup, inGroup ? 1 : 0);
-    }
-
     void announce(final String name, final int hubPort, final boolean inGroup, final int memberCount) {
         if (name == null || name.trim().isEmpty()) return;
         new Thread(new Runnable() {
@@ -121,20 +111,16 @@ final class Lan {
         if (s != null) s.close();
     }
 
-    static byte[] encodePacket(String name, int hubPort, boolean inGroup) {
-        return encodePacket(name, hubPort, inGroup, inGroup ? 1 : 0);
-    }
-
     static byte[] encodePacket(String name, int hubPort, boolean inGroup, int memberCount) {
         String clean = name.replace('\n', ' ').trim();
         String msg = MAGIC + "\n" + clean + "\n" + hubPort + "\n"
                 + (inGroup ? "1" : "0") + "\n" + Math.max(0, memberCount);
-        return msg.getBytes(UTF8);
+        return msg.getBytes(Hub.UTF8);
     }
 
     static Peer decodePacket(byte[] buf, int len, InetAddress sender) {
         if (buf == null || len <= 0 || len > 512) return null;
-        String s = new String(buf, 0, len, UTF8);
+        String s = new String(buf, 0, len, Hub.UTF8);
         String[] parts = s.split("\n");
         if (parts.length < 4 || !MAGIC.equals(parts[0])) return null;
         String name = parts[1].trim();

@@ -26,13 +26,20 @@ final class ApkShare {
     private volatile boolean running;
 
     synchronized String start(final Context ctx) {
+        return start(apkFile(ctx));
+    }
+
+    synchronized String start(final File apk) {
         stop();
-        final File apk = apkFile(ctx);
         if (apk == null || !apk.isFile()) return null;
         try {
-            ServerSocket ss = new ServerSocket();
+            final ServerSocket ss = new ServerSocket();
             ss.setReuseAddress(true);
-            ss.bind(new InetSocketAddress(HTTP_PORT));
+            try {
+                ss.bind(new InetSocketAddress(HTTP_PORT));
+            } catch (IOException busy) {
+                ss.bind(new InetSocketAddress(0));
+            }
             server = ss;
             running = true;
             Thread t = new Thread(new Runnable() {
@@ -44,11 +51,15 @@ final class ApkShare {
             t.start();
             InetAddress ip = Lan.localIPv4();
             String host = ip != null ? ip.getHostAddress() : "192.168.49.1";
-            return "http://" + host + ":" + HTTP_PORT;
+            return "http://" + host + ":" + ss.getLocalPort();
         } catch (IOException e) {
             running = false;
             return null;
         }
+    }
+
+    synchronized int port() {
+        return server != null ? server.getLocalPort() : 0;
     }
 
     static File apkFile(Context ctx) {

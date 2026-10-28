@@ -2,6 +2,32 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.17.0] - 2026-10-28
+
+### Diperbaiki & Dioptimalkan (Audit Menyeluruh `android-skills` + `/ponytail-audit` & Keystore Persisten)
+- **Eliminasi Disk I/O di Main UI Thread pada Peta Offline (`MapView`)**:
+  - Memindahkan pemeriksaan berkas *tile* dan `BitmapFactory.decodeFile()` dari `MapView.onDraw()` ke *daemon executor thread* latar (`tile-loader`) dengan himpunan `missing`/`loading` yang *thread-safe*, serta tetap menggambar *tile* induk terdekat dari `cache` secara instan saat menggeser atau memperbesar peta.
+- **Isolasi Thread Penyimpanan Video dari Aliran Suara Walkie-Talkie (`MainActivity`)**:
+  - Memindahkan penulisan berkas video 15 detik (`saveClip`) dan ekstraksi *thumbnail* (`MediaMetadataRetriever`) di `onVideo()` ke *worker thread* `"video-save"` sehingga thread jaringan `link-reader` tidak pernah tertahan saat menerima paket suara `AUDIO` *real-time*.
+- **Fallback Port Ephemeral Otomatis & Pengujian Server APK Offline (`ApkShare`, `AdpcmTest`)**:
+  - Menambahkan *fallback* port bebas (`new InetSocketAddress(0)`) pada `ApkShare.start()` apabila port TCP `8989` sedang sibuk atau berada di status `TIME_WAIT`, dilengkapi unit test otomatis `offlineApkShareServesHtmlAndApkBinaryWithPortFallback`.
+- **Pembatasan Memori, Keamanan `WakeLock`, & Konkurensi Wi‑Fi Aware (`MainActivity`, `KeepAliveService`, `Aware`, `Ble`, `Lan`, `Bridge`)**:
+  - Membatasi ukuran map deduplikasi `recentMeshTexts` maksimum 256 entri (`LinkedHashMap.removeEldestEntry`), membatasi `WakeLock.acquire()` dengan *timeout* aman 6 jam, mengindeks sesi klien Wi‑Fi Aware per-`PeerHandle` (`ConcurrentHashMap`), serta menyatukan konstanta `Hub.UTF8` dan membersihkan *overload* lama di `Lan.java`.
+- **Penandatanganan APK Konsisten (`debug.keystore` & `SIGNING_KEYSTORE_B64`)**:
+  - Menyertakan *keystore* tetap dan menyimpannya di GitHub Secrets agar setiap pembaruan APK dapat langsung diinstal (*in-place update*) di atas versi sebelumnya tanpa harus menghapus aplikasi lama.
+
+## [0.16.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Adopsi Arsitektur MeshLive Tanpa Live Camera Stream)
+- **Tahap 1 — Ketahanan Radio BLE, Wi‑Fi Coexistence & Optimasi Link (`Ble`, `Bt`, `MainActivity`)**:
+  - Menambahkan `AdvertisingWatchdog` (`.setTimeout(0)` + *watchdog* 25 detik), `setConnectedMode(boolean)` untuk menurunkan siklus pindai BLE ke `SCAN_MODE_BALANCED` saat grup aktif demi menjaga *airtime* Wi‑Fi 2.4 GHz, serta `optimizeBleLink()` (`CONNECTION_PRIORITY_HIGH`, `requestMtu(517)`, dan `setPreferredPhy` BLE 2M / Coded Long-Range PHY).
+- **Tahap 2 — Kualitas & Ergonomi Audio Walkie-Talkie (`Frame`, `Link`, `Voice`, `MainActivity`)**:
+  - Menambahkan `BoundedMediaAge` (`MAX_AUDIO_AGE_MS = 350 ms`) agar paket suara basi akibat kemacetan radio otomatis dibuang tanpa menimbulkan penundaan bertumpuk, *Packet Loss Concealment* (`Voice.concealFrame()`) untuk meredam bunyi klik saat paket hilang, dan perutean *earpiece* otomatis berbasis sensor jarak telinga (`TYPE_PROXIMITY`) pada Mode Telepon.
+- **Tahap 3 — Store-and-Forward & Pesan Suara 10 Detik (`Hub`, `Frame`, `MainActivity`)**:
+  - Menambahkan *ring buffer* `history` (32 pesan/instruksi/pesan suara terakhir) di `Hub` yang otomatis diputar ulang saat anggota baru bergabung atau tersambung kembali, serta fitur rekam & kirim **Pesan Suara ADPCM 10 Detik** (`Frame.VOICE_NOTE = 16`).
+- **Tahap 4 — Distribusi APK Offline Tanpa Internet (`ApkShare`, `CaptureProvider`, `MainActivity`)**:
+  - Menambahkan fitur **"Bagikan APK Offline (Tanpa Internet)"** pada menu profil yang membuka server HTTP lokal (`ApkShare`) serta berbagi berkas `.apk` via Bluetooth/Quick Share (`CaptureProvider.APK`).
+
 ## [0.15.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Wi‑Fi Aware + Bluetooth Mesh Network + Multi-Hop Relay Otomatis)

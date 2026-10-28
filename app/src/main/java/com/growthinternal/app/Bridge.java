@@ -13,7 +13,6 @@ import android.os.Build;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
-import java.nio.charset.Charset;
 import java.util.Collections;
 
 /**
@@ -25,8 +24,6 @@ import java.util.Collections;
  * the uplink goes to the far owner's IPv6 link-local address, which is unique.
  */
 final class Bridge {
-    private static final Charset UTF8 = Charset.forName("UTF-8");
-
     static final class Info {
         final String ssid, pass, ipv6;
 
@@ -44,13 +41,13 @@ final class Bridge {
     }
 
     static byte[] encode(String ssid, String pass, String ipv6) {
-        return (ssid + "\n" + pass + "\n" + ipv6).getBytes(UTF8);
+        return (ssid + "\n" + pass + "\n" + ipv6).getBytes(Hub.UTF8);
     }
 
     /** Null if the payload is not three lines with a network name, passphrase and IPv6 address. */
     static Info decode(byte[] payload) {
         if (payload == null) return null;
-        String[] p = new String(payload, UTF8).split("\n", -1);
+        String[] p = new String(payload, Hub.UTF8).split("\n", -1);
         if (p.length != 3 || p[0].isEmpty() || p[1].length() < 8 || p[2].isEmpty()) return null;
         if (!p[2].matches("[0-9a-fA-F:]+")) return null;
         return new Info(p[0], p[1], p[2]);

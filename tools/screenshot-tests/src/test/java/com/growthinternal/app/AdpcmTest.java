@@ -341,4 +341,50 @@ public class AdpcmTest {
         budi.stop();
         owner.stop();
     }
+
+    @Test public void offlineApkShareServesHtmlAndApkBinaryWithPortFallback() throws Exception {
+        java.io.File fakeApk = java.nio.file.Files.createTempFile("growth", ".apk").toFile();
+        byte[] payload = "PK\003\004GrowthInternalOfflineApkPayload".getBytes(Hub.UTF8);
+        java.nio.file.Files.write(fakeApk.toPath(), payload);
+
+        ApkShare s1 = new ApkShare();
+        ApkShare s2 = new ApkShare();
+        try {
+            String url1 = s1.start(fakeApk);
+            String url2 = s2.start(fakeApk); // port 8989 is busy, must fall back to ephemeral port
+            assertNotNull(url1);
+            assertNotNull(url2);
+            assertTrue(s1.port() > 0);
+            assertTrue(s2.port() > 0);
+            assertNotEquals(s1.port(), s2.port());
+
+            String landing = new String(httpGet(s1.port(), "/"), Hub.UTF8);
+            assertTrue(landing.contains("HTTP/1.1 200 OK"));
+            assertTrue(landing.contains("/growth-internal.apk"));
+
+            byte[] dl = httpGet(s2.port(), "/growth-internal.apk");
+            String dlStr = new String(dl, Hub.UTF8);
+            assertTrue(dlStr.contains("application/vnd.android.package-archive"));
+            assertTrue(dlStr.endsWith("PK\003\004GrowthInternalOfflineApkPayload"));
+        } finally {
+            s1.stop();
+            s2.stop();
+            fakeApk.delete();
+        }
+    }
+
+    private static byte[] httpGet(int port, String path) throws Exception {
+        java.net.Socket s = new java.net.Socket("127.0.0.1", port);
+        try {
+            s.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: localhost\r\n\r\n").getBytes(Hub.UTF8));
+            s.getOutputStream().flush();
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            int n;
+            while ((n = s.getInputStream().read(buf)) > 0) out.write(buf, 0, n);
+            return out.toByteArray();
+        } finally {
+            s.close();
+        }
+    }
 }

@@ -44,8 +44,9 @@ public class KeepAliveService extends Service {
         if (wake == null) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "growthinternal:group");
-            wake.acquire();
+            wake.setReferenceCounted(false);
         }
+        wake.acquire(6 * 60 * 60 * 1000L);
         if (wifi == null) {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "growthinternal:group");
