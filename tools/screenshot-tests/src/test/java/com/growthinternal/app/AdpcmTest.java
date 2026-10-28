@@ -573,6 +573,10 @@ public class AdpcmTest {
         hubD.addStreamLink(de[0].in, de[0].out, de[0], true);
         hubE.addStreamLink(de[1].in, de[1].out, de[1], true);
         HubTest.waitFor(rD, "join:Node E");
+        HubTest.waitFor(rE, "join:Node D");
+        for (int i = 0; i < 20 && (hubD.clusterId() != hubE.clusterId() || hubD.clusterSize() < 2); i++) {
+            Thread.sleep(50);
+        }
 
         // Link 3-node cluster (C) with 2-node cluster (D): larger 3-node cluster must always win!
         MeshAccess.Pipe[] cd = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);

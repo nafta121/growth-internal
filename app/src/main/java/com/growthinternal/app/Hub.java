@@ -243,11 +243,11 @@ final class Hub implements Link.Listener {
                         Link link = new Link(s, Hub.this);
                         link.relay = true;
                         link.sentBridge = true;
-                        // Queued before the reader starts, so the far owner knows we are a
-                        // bridge before any phone behind us is introduced.
+                        // Queued before the reader starts, so the far owner knows our cluster
+                        // and that we are a bridge before any phone behind us is introduced.
+                        link.send(buildClusterFrame());
                         link.send(new Frame(Frame.HELLO, myName, myPhoto));
                         link.send(new Frame(Frame.BRIDGE, myName, null));
-                        link.send(buildClusterFrame());
                         byte[] p = myPresence;
                         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
                         uplink = link;
@@ -267,8 +267,8 @@ final class Hub implements Link.Listener {
     private void addLink(Socket s) throws IOException {
         if (stopped) { s.close(); return; }
         Link link = new Link(s, this);
-        link.send(new Frame(Frame.HELLO, myName, myPhoto));
         link.send(buildClusterFrame());
+        link.send(new Frame(Frame.HELLO, myName, myPhoto));
         byte[] p = myPresence;
         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
         links.add(link);
@@ -279,8 +279,8 @@ final class Hub implements Link.Listener {
             java.io.Closeable raw, boolean lowBandwidth) throws IOException {
         if (stopped || links.size() >= MAX_LINKS) { raw.close(); return; }
         Link link = new Link(in, out, raw, lowBandwidth, this);
-        link.send(new Frame(Frame.HELLO, myName, myPhoto));
         link.send(buildClusterFrame());
+        link.send(new Frame(Frame.HELLO, myName, myPhoto));
         byte[] p = myPresence;
         if (p != null) link.send(new Frame(Frame.PRESENCE, myName, p));
         links.add(link);
@@ -345,10 +345,12 @@ final class Hub implements Link.Listener {
     @Override public void onFrame(Link from, Frame f) {
         if (f.type == Frame.HELLO) {
             boolean multiHop = owner || links.size() > 1;
+            boolean directJoin;
             // The first HELLO on a link names the phone at the other end; a client or relay
             // later receives relayed HELLOs of the other members over the same link.
             synchronized (members) {
-                if (from.peerName == null) {
+                directJoin = (from.peerName == null);
+                if (directJoin) {
                     if (multiHop && nameTaken(f.sender)) {
                         if (from == uplink) {
                             cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
@@ -372,6 +374,7 @@ final class Hub implements Link.Listener {
                         }
                     }
                     if (multiHop) {
+                        from.send(buildClusterFrame());
                         // Everyone we know of, including phones behind bridges/relays.
                         for (Map.Entry<String, byte[]> e : members.entrySet()) {
                             if (!e.getKey().equals(f.sender)) from.send(new Frame(Frame.HELLO, e.getKey(), e.getValue()));
@@ -400,8 +403,8 @@ final class Hub implements Link.Listener {
                 members.put(f.sender, f.payload);
             }
             if (multiHop) {
+                broadcast(buildClusterFrame(), directJoin ? null : from);
                 broadcast(f, from);
-                broadcast(buildClusterFrame(), null);
             }
             cb.onMemberJoined(f.sender, f.payload);
             return;
