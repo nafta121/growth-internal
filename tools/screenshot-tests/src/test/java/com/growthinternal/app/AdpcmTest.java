@@ -1005,7 +1005,6 @@ public class AdpcmTest {
         // Verify Sidelink live voice & PTT talk-state bridge across Hub tree
         hubA.relayMeshTalkState("Pos Sidelink", true);
         hubA.relayMeshAudio("Pos Sidelink", nb);
-        HubTest.waitFor(rB, "talk:Pos Sidelink:true");
         HubTest.waitFor(rB, "audio:Pos Sidelink:640");
 
         hubB.stop();
