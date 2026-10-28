@@ -162,8 +162,42 @@ final class Lan {
         }
     }
 
+    static boolean isVirtualOrCellularInterface(String ifName) {
+        if (ifName == null) return true;
+        String lower = ifName.trim().toLowerCase();
+        if (lower.isEmpty() || "lo".equals(lower)) return true;
+        String[] blocked = {
+            "tun", "tap", "ppp", "wg", "tailscale", "rmnet", "ccmni", "clat", "dummy", "v4-", "ipsec"
+        };
+        for (String prefix : blocked) {
+            if (lower.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    static boolean isPreferredWifiInterface(String ifName) {
+        if (ifName == null) return false;
+        String lower = ifName.trim().toLowerCase();
+        return lower.startsWith("wlan") || lower.startsWith("ap")
+                || lower.startsWith("softap") || lower.startsWith("swlan")
+                || lower.startsWith("wifi") || lower.startsWith("uap");
+    }
+
+    static InetAddress gatewayFor(InetAddress ipv4) {
+        if (!(ipv4 instanceof Inet4Address) || ipv4.isLoopbackAddress()) return null;
+        byte[] raw = ipv4.getAddress();
+        if (raw == null || raw.length != 4 || (raw[3] & 0xFF) == 1) return null;
+        raw[3] = 1;
+        try {
+            return InetAddress.getByAddress(raw);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     static InetAddress localIPv4() {
-        InetAddress fallback = null;
+        InetAddress otherLan = null;
+        InetAddress p2pFallback = null;
         try {
             Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
             if (ifs == null) return null;
@@ -171,19 +205,22 @@ final class Lan {
                 NetworkInterface nif = ifs.nextElement();
                 if (!nif.isUp() || nif.isLoopback()) continue;
                 String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+                if (isVirtualOrCellularInterface(ifName)) continue;
                 boolean isP2p = ifName.startsWith("p2p");
+                boolean isWifi = isPreferredWifiInterface(ifName);
                 Enumeration<InetAddress> addrs = nif.getInetAddresses();
                 while (addrs.hasMoreElements()) {
                     InetAddress a = addrs.nextElement();
                     if (a instanceof Inet4Address && !a.isLoopbackAddress()) {
-                        if (!isP2p) return a;
-                        if (fallback == null) fallback = a;
+                        if (isWifi) return a;
+                        if (!isP2p && otherLan == null) otherLan = a;
+                        if (isP2p && p2pFallback == null) p2pFallback = a;
                     }
                 }
             }
         } catch (IOException ignored) {
         }
-        return fallback;
+        return otherLan != null ? otherLan : p2pFallback;
     }
 
     private static List<InetAddress> broadcastAddresses() {
@@ -195,9 +232,12 @@ final class Lan {
                 while (ifs.hasMoreElements()) {
                     NetworkInterface nif = ifs.nextElement();
                     if (!nif.isUp() || nif.isLoopback()) continue;
+                    if (isVirtualOrCellularInterface(nif.getName())) continue;
                     for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
                         InetAddress b = ia.getBroadcast();
                         if (b != null && !list.contains(b)) list.add(b);
+                        InetAddress gw = gatewayFor(ia.getAddress());
+                        if (gw != null && !list.contains(gw)) list.add(gw);
                     }
                 }
             }

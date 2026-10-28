@@ -14,8 +14,9 @@ import java.util.Map;
  */
 final class Clips {
     static final int CHUNK = 32 * 1024;
+    static final int IMAGE_CHUNK = 8 * 1024;
     static final int MAX_BYTES = 4 * 1024 * 1024;
-    static final int MAX_CHUNKS = MAX_BYTES / CHUNK;
+    static final int MAX_CHUNKS = MAX_BYTES / IMAGE_CHUNK;
     static final int HEADER = 8;
     private static final int MAX_PENDING = 4;
     private static final long STALE_MS = 60000;
@@ -23,12 +24,18 @@ final class Clips {
     private Clips() { }
 
     static List<byte[]> split(int clipId, byte[] data) {
-        if (data.length == 0 || data.length > MAX_BYTES) throw new IllegalArgumentException("clip size");
-        int total = (data.length + CHUNK - 1) / CHUNK;
+        return split(clipId, data, CHUNK);
+    }
+
+    static List<byte[]> split(int clipId, byte[] data, int chunkSize) {
+        if (data == null || data.length == 0 || data.length > MAX_BYTES || chunkSize <= 0) {
+            throw new IllegalArgumentException("clip size");
+        }
+        int total = (data.length + chunkSize - 1) / chunkSize;
         List<byte[]> out = new ArrayList<byte[]>(total);
         for (int i = 0; i < total; i++) {
-            int off = i * CHUNK;
-            int n = Math.min(CHUNK, data.length - off);
+            int off = i * chunkSize;
+            int n = Math.min(chunkSize, data.length - off);
             ByteBuffer b = ByteBuffer.allocate(HEADER + n);
             b.putInt(clipId).putShort((short) i).putShort((short) total).put(data, off, n);
             out.add(b.array());
@@ -51,11 +58,20 @@ final class Clips {
             Pending(int total) { parts = new byte[total][]; }
         }
 
+        private final int chunkSize;
         private final Map<String, Pending> pending = new HashMap<String, Pending>();
+
+        Assembler() {
+            this(CHUNK);
+        }
+
+        Assembler(int chunkSize) {
+            this.chunkSize = chunkSize > 0 ? chunkSize : CHUNK;
+        }
 
         /** Returns the whole clip when its last chunk arrives, otherwise null. */
         synchronized byte[] add(String sender, byte[] payload, long now) {
-            if (payload.length <= HEADER || payload.length > HEADER + CHUNK) return null;
+            if (payload == null || payload.length <= HEADER || payload.length > HEADER + chunkSize) return null;
             ByteBuffer b = ByteBuffer.wrap(payload);
             int id = b.getInt();
             int index = b.getShort();
@@ -70,7 +86,7 @@ final class Clips {
                 pending.put(key, p);
             }
             if (p.parts.length != total || p.parts[index] != null) return null;
-            if (index < total - 1 && payload.length != HEADER + CHUNK) return null;
+            if (index < total - 1 && payload.length != HEADER + chunkSize) return null;
             p.parts[index] = java.util.Arrays.copyOfRange(payload, HEADER, payload.length);
             p.received++;
             p.touched = now;

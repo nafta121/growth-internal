@@ -20,7 +20,7 @@ final class Link {
     }
 
     private static final int MAX_QUEUED_AUDIO = 25;
-    private static final int MAX_LOW_BW_BULK = 64;
+    private static final int MAX_LOW_BW_BULK = 160;
     static final long MAX_AUDIO_AGE_MS = 350L;
     // Each side pings when idle; a link silent for longer than the timeout is dropped,
     // so a phone walking out of range is noticed within seconds.
@@ -32,10 +32,12 @@ final class Link {
     private final Listener listener;
     private final DataInputStream in;
     private final DataOutputStream out;
+    // BlueRange 3-tier queues: vital control/SOS -> realtime voice/chat -> chunked media bulk
+    private final LinkedBlockingQueue<Frame> vital = new LinkedBlockingQueue<Frame>();
     private final LinkedBlockingQueue<Frame> queue = new LinkedBlockingQueue<Frame>();
-    // Photos and clip chunks wait here and go out only when no voice or chat is queued.
+    // Photos, voice notes, and clip chunks wait here and go out only when no vital/voice/chat is queued.
     private final LinkedBlockingQueue<Frame> bulk = new LinkedBlockingQueue<Frame>();
-    // Put on the main queue to wake an idle writer when bulk work arrives; never sent.
+    // Put on the main queue to wake an idle writer when vital or bulk work arrives; never sent.
     private static final Frame WAKE = new Frame(Frame.PING, "", null);
     private volatile boolean closed;
     private Thread writer;
@@ -84,16 +86,21 @@ final class Link {
         if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM) {
             if (queue.size() > MAX_QUEUED_AUDIO) return;
             if (System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) return;
-            if (lowBandwidth && f.type == Frame.AUDIO) {
+            if ((lowBandwidth || relay) && f.type == Frame.AUDIO && f.payload.length >= 4) {
                 f = new Frame(Frame.AUDIO_ADPCM, f.sender, Adpcm.encode(f.payload), f.createdMs);
             }
         }
-        if (f.type == Frame.IMAGE || f.type == Frame.VIDEO_CHUNK) {
+        if (f.type == Frame.IMAGE || f.type == Frame.IMAGE_CHUNK
+                || f.type == Frame.VIDEO_CHUNK || f.type == Frame.VOICE_NOTE) {
             if (lowBandwidth && bulk.size() >= MAX_LOW_BW_BULK) return;
             bulk.offer(f);
             if (queue.isEmpty()) queue.offer(WAKE);
-        } else {
+        } else if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM
+                || f.type == Frame.TEXT || f.type == Frame.ANNOUNCE) {
             queue.offer(f);
+        } else {
+            vital.offer(f);
+            if (queue.isEmpty()) queue.offer(WAKE);
         }
     }
 
@@ -102,10 +109,16 @@ final class Link {
     private void writeLoop() {
         try {
             while (!closed) {
-                Frame f = queue.poll();
+                Frame f = vital.poll();
+                if (f == null) f = queue.poll();
                 if (f == null) f = bulk.poll();
                 if (f == null) f = queue.poll(PING_MS, TimeUnit.MILLISECONDS);
-                if (f == WAKE) continue;
+                if (f == WAKE) {
+                    f = vital.poll();
+                    if (f == null) f = queue.poll();
+                    if (f == null) f = bulk.poll();
+                    if (f == null) continue;
+                }
                 if (f == null) f = new Frame(Frame.PING, "", null);
                 if ((f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM)
                         && System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) {
@@ -115,7 +128,7 @@ final class Link {
                 out.writeUTF(f.sender);
                 out.writeInt(f.payload.length);
                 out.write(f.payload);
-                if (queue.isEmpty()) out.flush();
+                if (vital.isEmpty() && queue.isEmpty()) out.flush();
             }
         } catch (InterruptedException ignored) {
         } catch (IOException e) {

@@ -19,6 +19,8 @@ final class Frame {
     static final byte AUDIO_ADPCM = 15; // 4-bit IMA ADPCM audio for low-bandwidth Bluetooth links
     static final byte VOICE_NOTE = 16;  // 4-bit IMA ADPCM recorded voice note (store-and-forward)
     static final byte CLUSTER_UPDATE = 17; // BlueRange CLUSTER_INFO_UPDATE: 16-bit clusterId + 16-bit clusterSize
+    static final byte IMAGE_CHUNK = 18; // FISSURE/BlueRange 8 KB chunked image transfer (non-blocking)
+    static final byte MESH_RELAY = 19;  // Cross-transport BLE <-> Hub multi-hop relay envelope
 
     /** Largest payload accepted per type, so a bad peer cannot exhaust memory. */
     static int maxPayload(byte type) {
@@ -29,10 +31,12 @@ final class Frame {
             case VOICE_NOTE: return 48 * 1024;
             case TEXT:
             case ANNOUNCE:
-            case REJECT: return 8 * 1024;
+            case REJECT:
+            case MESH_RELAY: return 8 * 1024;
             case PRESENCE: return 256;
             case IMAGE: return Photos.MAX_BYTES; // one compressed JPEG
             case VIDEO_CHUNK: return Clips.HEADER + Clips.CHUNK;
+            case IMAGE_CHUNK: return Clips.HEADER + Clips.IMAGE_CHUNK;
             case JOIN_INFO: return 512;
             case CLUSTER_UPDATE: return 16;
             default: return 0;

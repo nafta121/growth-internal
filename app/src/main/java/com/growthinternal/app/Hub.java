@@ -68,10 +68,16 @@ final class Hub implements Link.Listener {
     private final List<Link> links = new CopyOnWriteArrayList<Link>();
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
     private final Clips.Assembler clips = new Clips.Assembler();
+    private final Clips.Assembler images = new Clips.Assembler(Clips.IMAGE_CHUNK);
     // Latest PRESENCE payload per member, replayed by the owner to phones that join later.
     private final Map<String, byte[]> presences = new LinkedHashMap<String, byte[]>();
     // Store-and-forward buffer for recent chat, instructions, and voice notes.
     private final List<Frame> history = new ArrayList<Frame>();
+    private final Map<Integer, Long> seenRelays = new LinkedHashMap<Integer, Long>() {
+        @Override protected boolean removeEldestEntry(Map.Entry<Integer, Long> eldest) {
+            return size() > 128;
+        }
+    };
     private volatile byte[] myPresence;
     private final String myName;
     private final byte[] myPhoto;
@@ -299,9 +305,61 @@ final class Hub implements Link.Listener {
 
     private void recordHistory(Frame f) {
         synchronized (history) {
+            for (Frame existing : history) {
+                if (existing.type == f.type && existing.sender.equals(f.sender)
+                        && java.util.Arrays.equals(existing.payload, f.payload)) {
+                    return;
+                }
+            }
             if (history.size() >= MAX_HISTORY) history.remove(0);
             history.add(f);
         }
+    }
+
+    private boolean recordSeenRelay(byte[] env) {
+        if (env == null || env.length < 2) return false;
+        int h = java.util.Arrays.hashCode(env);
+        long now = System.currentTimeMillis();
+        synchronized (seenRelays) {
+            Long prev = seenRelays.get(h);
+            seenRelays.put(h, now);
+            return prev == null || now - prev > 10000L;
+        }
+    }
+
+    static byte[] encodeMeshRelay(byte innerType, String originSender, byte[] innerPayload) {
+        if (originSender == null) return null;
+        byte[] s = originSender.trim().getBytes(UTF8);
+        if (s.length == 0 || s.length > 64) return null;
+        int pLen = innerPayload != null ? innerPayload.length : 0;
+        byte[] out = new byte[2 + s.length + pLen];
+        out[0] = innerType;
+        out[1] = (byte) s.length;
+        System.arraycopy(s, 0, out, 2, s.length);
+        if (pLen > 0) System.arraycopy(innerPayload, 0, out, 2 + s.length, pLen);
+        return out;
+    }
+
+    void relayMeshText(String originSender, String text) {
+        if (text == null || text.isEmpty()) return;
+        relayMeshPacket(Frame.TEXT, originSender, text.getBytes(UTF8));
+    }
+
+    void relayMeshAnnounce(String originSender, String text) {
+        if (text == null || text.isEmpty()) return;
+        relayMeshPacket(Frame.ANNOUNCE, originSender, text.getBytes(UTF8));
+    }
+
+    void relayMeshPresence(String originSender, byte[] presence) {
+        if (presence == null || presence.length == 0) return;
+        relayMeshPacket(Frame.PRESENCE, originSender, presence);
+    }
+
+    void relayMeshPacket(byte innerType, String originSender, byte[] innerPayload) {
+        if (originSender == null || originSender.equals(myName) || links.isEmpty()) return;
+        byte[] env = encodeMeshRelay(innerType, originSender, innerPayload);
+        if (env == null || !recordSeenRelay(env)) return;
+        broadcast(new Frame(Frame.MESH_RELAY, myName, env), null);
     }
 
     void sendPresence(byte[] presence) {
@@ -328,7 +386,11 @@ final class Hub implements Link.Listener {
     }
 
     void sendImage(byte[] jpeg) {
-        broadcast(new Frame(Frame.IMAGE, myName, jpeg), null);
+        if (jpeg == null || jpeg.length == 0) return;
+        int id = new java.util.Random().nextInt();
+        for (byte[] chunk : Clips.split(id, jpeg, Clips.IMAGE_CHUNK)) {
+            broadcast(new Frame(Frame.IMAGE_CHUNK, myName, chunk), null);
+        }
     }
 
     void sendVideo(byte[] mp4) {
@@ -478,6 +540,14 @@ final class Hub implements Link.Listener {
         // itself, a bridge/relay for the phones behind it. This stops one member from posing
         // as another (fake SOS or announcements) and prevents mesh loops.
         if (!from.behind.contains(f.sender)) return;
+        if (f.type == Frame.MESH_RELAY) {
+            if (!recordSeenRelay(f.payload)) return;
+            if (owner || links.size() > 1) {
+                broadcast(new Frame(Frame.MESH_RELAY, myName, f.payload), from);
+            }
+            handleMeshRelay(f.payload);
+            return;
+        }
         if (f.type == Frame.AUDIO_ADPCM) {
             f = new Frame(Frame.AUDIO, f.sender, Adpcm.decode(f.payload));
         }
@@ -514,6 +584,10 @@ final class Hub implements Link.Listener {
             case Frame.IMAGE:
                 cb.onImage(f.sender, f.payload);
                 break;
+            case Frame.IMAGE_CHUNK:
+                byte[] img = images.add(f.sender, f.payload, System.currentTimeMillis());
+                if (img != null) cb.onImage(f.sender, img);
+                break;
             case Frame.VIDEO_CHUNK:
                 if (Clips.index(f.payload) == 0) cb.onVideoIncoming(f.sender);
                 byte[] clip = clips.add(f.sender, f.payload, System.currentTimeMillis());
@@ -521,6 +595,29 @@ final class Hub implements Link.Listener {
                 break;
             case Frame.LEAVE:
                 removeMember(f.sender);
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void handleMeshRelay(byte[] env) {
+        if (env == null || env.length < 3) return;
+        byte innerType = env[0];
+        int sLen = env[1] & 0xFF;
+        if (sLen <= 0 || 2 + sLen > env.length) return;
+        String originSender = new String(env, 2, sLen, UTF8).trim();
+        if (originSender.isEmpty() || originSender.equals(myName)) return;
+        byte[] innerPayload = java.util.Arrays.copyOfRange(env, 2 + sLen, env.length);
+        switch (innerType) {
+            case Frame.TEXT:
+                cb.onText(originSender, new String(innerPayload, UTF8));
+                break;
+            case Frame.ANNOUNCE:
+                cb.onAnnouncement(originSender, new String(innerPayload, UTF8));
+                break;
+            case Frame.PRESENCE:
+                cb.onPresence(originSender, innerPayload);
                 break;
             default:
                 break;
@@ -594,6 +691,7 @@ final class Hub implements Link.Listener {
         synchronized (members) { had = members.remove(name) != null; }
         synchronized (presences) { presences.remove(name); }
         clips.drop(name);
+        images.drop(name);
         if (had) {
             cb.onTalkState(name, false);
             cb.onMemberLeft(name);

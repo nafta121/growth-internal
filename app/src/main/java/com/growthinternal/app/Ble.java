@@ -11,12 +11,16 @@ import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
@@ -48,6 +52,28 @@ final class Ble {
     private static final int MAX_MESH_SENDER = 8;
     private static final int MAX_MESH_TOTAL = 22;
     private static final int MAX_SEEN_IDS = 256;
+    static final byte FRAG_MAGIC = (byte) 0x1F;
+    static final int MAX_FRAG_PARTS = 7;
+    static final int MAX_FRAG_TEXT_BYTES = 56;
+    private static final int MAX_MESH_QUEUE = 16;
+    private static final long MESH_ADV_WINDOW_MS = 450L;
+
+    private static final class FragSlot {
+        final byte[][] parts;
+        int received;
+        FragSlot(int total) { parts = new byte[total][]; }
+    }
+
+    private static final class QueuedMesh {
+        final int msgId;
+        final byte[] raw;
+        int retries;
+        QueuedMesh(int msgId, byte[] raw, int retries) {
+            this.msgId = msgId;
+            this.raw = raw;
+            this.retries = retries;
+        }
+    }
 
     static final class Beacon {
         final String name;
@@ -105,6 +131,14 @@ final class Ble {
             return size() > MAX_SEEN_IDS;
         }
     };
+    private final Map<String, FragSlot> fragSlots = new LinkedHashMap<String, FragSlot>() {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, FragSlot> eldest) {
+            return size() > 32;
+        }
+    };
+    private final List<QueuedMesh> meshTxQueue = new ArrayList<QueuedMesh>();
+    private QueuedMesh activeMeshTx;
+    private volatile long lastScanResultMs;
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
     private boolean advertising;
@@ -121,6 +155,14 @@ final class Ble {
     private final Runnable watchdogRunnable = new Runnable() {
         @Override public void run() {
             if (adapter != null && adapter.isEnabled()) {
+                long now = System.currentTimeMillis();
+                // Spectre silent-stall recovery: restart BLE scanner if no callbacks arrived for WATCHDOG_MS
+                if (scanning && lastScanResultMs > 0 && now - lastScanResultMs > WATCHDOG_MS) {
+                    if (scanner != null) {
+                        try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}
+                    }
+                    scanning = false;
+                }
                 if (!scanning) startScan();
                 if (!advertising && !meshAdvertising && lastAdvName != null) {
                     updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm, lastAdvClusterId);
@@ -151,7 +193,17 @@ final class Ble {
     private final Runnable stopMeshRunnable = new Runnable() {
         @Override public void run() {
             stopMeshAdvertise();
-            if (!advertising && lastAdvName != null) {
+            // FISSURE Implicit Echo ACK: if origin packet was not echoed by any neighbor, retry once
+            if (activeMeshTx != null && activeMeshTx.retries > 0
+                    && overheardCount(activeMeshTx.msgId) < 2
+                    && meshTxQueue.size() < MAX_MESH_QUEUE) {
+                activeMeshTx.retries--;
+                meshTxQueue.add(activeMeshTx);
+            }
+            activeMeshTx = null;
+            if (!meshTxQueue.isEmpty()) {
+                pumpMeshTx();
+            } else if (!advertising && lastAdvName != null) {
                 updateAdvertise(lastAdvName, lastAdvPresence, lastAdvInGroup, lastAdvPsm, lastAdvClusterId);
             }
         }
@@ -160,6 +212,7 @@ final class Ble {
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override public void onScanResult(int callbackType, ScanResult result) {
             if (result == null) return;
+            lastScanResultMs = System.currentTimeMillis();
             ScanRecord rec = result.getScanRecord();
             if (rec == null) return;
             byte[] data = rec.getServiceData(SERVICE_UUID);
@@ -174,7 +227,12 @@ final class Ble {
                 final MeshPacket pkt = unpackMesh(meshData);
                 final int rssi = result.getRssi();
                 if (pkt != null && recordSeenMesh(pkt.msgId)) {
-                    if (listener != null) listener.onMesh(pkt);
+                    byte[] assembled = reassembleMeshBody(pkt.sender, pkt.type, pkt.body);
+                    if (assembled != null && listener != null) {
+                        listener.onMesh(assembled == pkt.body
+                                ? pkt
+                                : new MeshPacket(pkt.msgId, pkt.ttl, pkt.type, pkt.sender, assembled));
+                    }
                     if (pkt.ttl > 1) {
                         final byte[] relayed = packMesh(pkt.msgId, pkt.ttl - 1, pkt.type, pkt.sender, pkt.body);
                         int delayMs = computeRelayDelayMs(rssi, random.nextInt(26));
@@ -182,12 +240,18 @@ final class Ble {
                             @Override public void run() {
                                 // Opportunistic suppression: near nodes skip relay if neighbors already forwarded it
                                 if (rssi > -65 && overheardCount(pkt.msgId) >= 2) return;
-                                advertiseMeshRaw(relayed);
+                                enqueueMeshRaw(pkt.msgId, relayed, 0);
                             }
                         }, delayMs);
                     }
                 }
             }
+        }
+
+        @Override public void onScanFailed(int errorCode) {
+            scanning = false;
+            handler.removeCallbacks(watchdogRunnable);
+            handler.postDelayed(watchdogRunnable, 2000L);
         }
     };
 
@@ -241,19 +305,27 @@ final class Ble {
         }
     }
 
+    // shortcut: uses reflection for BLE 5 Coded PHY scan settings because build.sh compiles against android-23; call directly when compileSdk >= 26
     void startScan() {
         if (scanning || adapter == null) return;
         try {
             if (!adapter.isEnabled()) return;
             scanner = adapter.getBluetoothLeScanner();
             if (scanner == null) return;
-            ScanSettings settings = new ScanSettings.Builder()
+            ScanSettings.Builder sb = new ScanSettings.Builder()
                     .setScanMode(connectedMode
                             ? ScanSettings.SCAN_MODE_BALANCED
-                            : ScanSettings.SCAN_MODE_LOW_LATENCY)
-                    .build();
-            scanner.startScan(null, settings, scanCallback);
+                            : ScanSettings.SCAN_MODE_LOW_LATENCY);
+            if (Build.VERSION.SDK_INT >= 26) {
+                try {
+                    ScanSettings.Builder.class.getMethod("setLegacy", boolean.class).invoke(sb, false);
+                    ScanSettings.Builder.class.getMethod("setPhy", int.class).invoke(sb, 255 /* PHY_LE_ALL_SUPPORTED */);
+                } catch (Exception ignored) {
+                }
+            }
+            scanner.startScan(null, sb.build(), scanCallback);
             scanning = true;
+            lastScanResultMs = System.currentTimeMillis();
             handler.removeCallbacks(watchdogRunnable);
             handler.postDelayed(watchdogRunnable, WATCHDOG_MS);
         } catch (RuntimeException ignored) {
@@ -304,12 +376,18 @@ final class Ble {
 
     void broadcastMeshText(String sender, String text) {
         if (text == null || text.isEmpty()) return;
-        sendMesh(MESH_TEXT, sender, trimUtf8(text, 10));
+        int gid = ((sender != null ? sender.hashCode() : 0) ^ text.hashCode()) & 0x03;
+        for (byte[] part : splitMeshText(text, gid)) {
+            sendMesh(MESH_TEXT, sender, part);
+        }
     }
 
     void broadcastMeshAnnounce(String sender, String text) {
         if (text == null || text.isEmpty()) return;
-        sendMesh(MESH_ANNOUNCE, sender, trimUtf8(text, 10));
+        int gid = ((sender != null ? sender.hashCode() : 0) ^ text.hashCode()) & 0x03;
+        for (byte[] part : splitMeshText(text, gid)) {
+            sendMesh(MESH_ANNOUNCE, sender, part);
+        }
     }
 
     void sendMesh(byte type, String sender, byte[] body) {
@@ -317,15 +395,29 @@ final class Ble {
         int msgId = (random.nextInt(0xFFFE) + 1) & 0xFFFF;
         recordSeenMesh(msgId);
         byte[] raw = packMesh(msgId, DEFAULT_TTL, type, sender, body);
-        if (raw != null) advertiseMeshRaw(raw);
+        if (raw != null) enqueueMeshRaw(msgId, raw, 1);
     }
 
-    private void advertiseMeshRaw(byte[] raw) {
-        if (raw == null || adapter == null) return;
+    private void enqueueMeshRaw(int msgId, byte[] raw, int retries) {
+        if (raw == null || meshTxQueue.size() >= MAX_MESH_QUEUE) return;
+        meshTxQueue.add(new QueuedMesh(msgId, raw, retries));
+        if (activeMeshTx == null) pumpMeshTx();
+    }
+
+    private void pumpMeshTx() {
+        if (meshTxQueue.isEmpty()) return;
+        activeMeshTx = meshTxQueue.remove(0);
+        if (!advertiseMeshRaw(activeMeshTx.raw)) {
+            activeMeshTx = null;
+        }
+    }
+
+    private boolean advertiseMeshRaw(byte[] raw) {
+        if (raw == null || adapter == null) return false;
         try {
-            if (!adapter.isEnabled()) return;
+            if (!adapter.isEnabled()) return false;
             advertiser = adapter.getBluetoothLeAdvertiser();
-            if (advertiser == null) return;
+            if (advertiser == null) return false;
             handler.removeCallbacks(stopMeshRunnable);
             stopMeshAdvertise();
             AdvertiseSettings settings = new AdvertiseSettings.Builder()
@@ -338,9 +430,11 @@ final class Ble {
                     .addServiceData(MESH_UUID, raw)
                     .build();
             advertiser.startAdvertising(settings, data, meshAdvertiseCallback);
-            handler.postDelayed(stopMeshRunnable, 900);
+            handler.postDelayed(stopMeshRunnable, MESH_ADV_WINDOW_MS);
+            return true;
         } catch (RuntimeException ignored) {
             meshAdvertising = false;
+            return false;
         }
     }
 
@@ -354,6 +448,8 @@ final class Ble {
     void stop() {
         handler.removeCallbacks(watchdogRunnable);
         handler.removeCallbacks(stopMeshRunnable);
+        meshTxQueue.clear();
+        activeMeshTx = null;
         if (scanning && scanner != null) {
             try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}
         }
@@ -363,6 +459,60 @@ final class Ble {
             try { advertiser.stopAdvertising(advertiseCallback); } catch (RuntimeException ignored) {}
         }
         advertising = false;
+    }
+
+    static List<byte[]> splitMeshText(String text, int groupId) {
+        byte[] full = trimUtf8(text, MAX_FRAG_TEXT_BYTES);
+        List<byte[]> out = new ArrayList<byte[]>();
+        if (full.length == 0) return out;
+        if (full.length <= 10) {
+            out.add(full);
+            return out;
+        }
+        int chunkCap = 8;
+        int total = Math.min(MAX_FRAG_PARTS, (full.length + chunkCap - 1) / chunkCap);
+        int gid = groupId & 0x03;
+        for (int i = 0; i < total; i++) {
+            int off = i * chunkCap;
+            int len = Math.min(chunkCap, full.length - off);
+            byte[] frag = new byte[2 + len];
+            frag[0] = FRAG_MAGIC;
+            frag[1] = (byte) ((gid << 6) | ((i & 0x07) << 3) | (total & 0x07));
+            System.arraycopy(full, off, frag, 2, len);
+            out.add(frag);
+        }
+        return out;
+    }
+
+    synchronized byte[] reassembleMeshBody(String sender, byte type, byte[] body) {
+        if (body == null || body.length < 2 || body[0] != FRAG_MAGIC) return body;
+        if (body.length == 2) return null;
+        int meta = body[1] & 0xFF;
+        int gid = (meta >>> 6) & 0x03;
+        int idx = (meta >>> 3) & 0x07;
+        int total = meta & 0x07;
+        if (total <= 1 || total > MAX_FRAG_PARTS || idx >= total) return null;
+        String key = sender + ":" + type + ":" + gid;
+        FragSlot slot = fragSlots.get(key);
+        if (slot == null || slot.parts.length != total) {
+            slot = new FragSlot(total);
+            fragSlots.put(key, slot);
+        }
+        if (slot.parts[idx] == null) {
+            slot.parts[idx] = Arrays.copyOfRange(body, 2, body.length);
+            slot.received++;
+        }
+        if (slot.received < total) return null;
+        fragSlots.remove(key);
+        int totalLen = 0;
+        for (byte[] p : slot.parts) totalLen += p.length;
+        byte[] assembled = new byte[totalLen];
+        int pos = 0;
+        for (byte[] p : slot.parts) {
+            System.arraycopy(p, 0, assembled, pos, p.length);
+            pos += p.length;
+        }
+        return assembled;
     }
 
     private static byte[] trimUtf8(String s, int maxBytes) {

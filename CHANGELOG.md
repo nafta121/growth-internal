@@ -2,6 +2,26 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.22.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Sinergi Multi-Hop & Multi-Device Spectre + FISSURE + BlueRange)
+- **Tahap 1 — *Spectre Smart NIC Filtering, Unicast `.1` Gateway Probe, & BLE 5 Coded PHY Scan Recovery* (`Lan`, `Ble`)**:
+  - Menambahkan pemfilteran antarmuka jaringan virtual/seluler (`isVirtualOrCellularInterface` & `isPreferredWifiInterface`) untuk memprioritaskan `wlan`/`ap`/`p2p`/`swlan` dan mengabaikan `tun`/`rmnet`/`clat`/`dummy`.
+  - Menambahkan *Unicast `.1` Gateway Probe* (`gatewayFor`) agar penemuan rekan pada Hotspot/Router tetap tembus meskipun router menerapkan *AP/Client Isolation* yang memblokir UDP broadcast/multicast.
+  - Mengaktifkan pemindaian **BLE 5 Extended + Coded PHY (`PHY_LE_ALL_SUPPORTED`)** pada Android 8.0+ serta pemulihan otomatis *silent-stall* di `Ble` (`onScanFailed` + `lastScanResultMs`).
+- **Tahap 2 — *FISSURE `LT` Micro-Fragmentation & Implicit Echo ACK* (`Ble`)**:
+  - Memperluas kapasitas teks Chat & Instruksi pada *BLE Flood Mesh* (`0xFD92`) dari 10 byte menjadi **56 byte (hingga 7 fragmen mikro `0x1F`)** dengan *out-of-order reassembly* (`splitMeshText` & `reassembleMeshBody`) dan tetap 100% kompatibel mundur untuk pesan `<= 10 byte`.
+  - Menambahkan antrean transmisi berurutan (`meshTxQueue`) dan **Implicit Echo ACK** yang mengulang siaran 1 kali secara otomatis apabila belum terdengar pantulan (*echo*) dari tetangga.
+- **Tahap 3 — *BlueRange 3-Tier Priority Queue, 8 KB Chunked Photo Transfer, & Multi-Hop ADPCM* (`Frame`, `Clips`, `Link`, `Hub`)**:
+  - Memisahkan antrean pengiriman `Link` menjadi 3 tingkat prioritas (`vital` > `queue` > `bulk`) agar sinyal darurat, PTT, dan suara *real-time* tidak pernah tertahan oleh pengiriman media.
+  - Mengubah pengiriman foto (`Frame.IMAGE_CHUNK = 18`) menjadi potongan **8 KB** (`Clips.IMAGE_CHUNK`) sehingga foto kini dapat dikirim menembus jalur ber-bandwidth rendah (Bluetooth, BLE L2CAP, dan `MeshAccess` GATT multi-hop) tanpa memblokir aliran suara.
+  - Mengaktifkan kompresi suara adaptif **4:1 IMA ADPCM (`Frame.AUDIO_ADPCM`)** secara otomatis pada seluruh link *bridge/relay* multi-hop.
+- **Tahap 4 — *Cross-Transport `Frame.MESH_RELAY` Bridging, Fast-Reconnect Sustain, & Seleksi Relay Tanpa GPS* (`Frame`, `Hub`, `MeshCoordinator`, `MainActivity`)**:
+  - Menambahkan jembatan dua arah otomatis antara *BLE Flood Mesh* (`0xFD92`) dan pohon `Hub` (`Frame.MESH_RELAY = 19`) untuk Chat, Instruksi, dan Status/SOS tanpa mencemari daftar `Hub.members`.
+  - Menambahkan `clearPeerCooldown` untuk penyambungan ulang cepat `< 1 detik` saat koneksi terputus mendadak serta `selectBestSignalRelay` berbasis koherensi sinyal Welford ketika GPS mati atau berada di dalam ruangan.
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan pengujian unit `spectreFissureBluerangeMultiHopCommunicationUpgrade` yang memverifikasi seluruh fitur Tahap 1–4 secara *end-to-end*.
+
 ## [0.21.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Peningkatan Konektivitas & Jangkauan Ala RuView)

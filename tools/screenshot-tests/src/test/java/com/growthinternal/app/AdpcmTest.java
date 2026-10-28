@@ -758,6 +758,125 @@ public class AdpcmTest {
         hubA.stop();
     }
 
+    @Test public void spectreFissureBluerangeMultiHopCommunicationUpgrade() throws Exception {
+        // 1. Stage 1: Spectre Smart NIC Filtering & Unicast .1 Gateway Probe
+        assertTrue(Lan.isVirtualOrCellularInterface("tun0"));
+        assertTrue(Lan.isVirtualOrCellularInterface("rmnet_data0"));
+        assertTrue(Lan.isVirtualOrCellularInterface("clat4"));
+        assertFalse(Lan.isVirtualOrCellularInterface("wlan0"));
+        assertTrue(Lan.isPreferredWifiInterface("wlan0"));
+        assertTrue(Lan.isPreferredWifiInterface("ap0"));
+        assertTrue(Lan.isPreferredWifiInterface("swlan0"));
+
+        InetAddress clientIp = InetAddress.getByName("192.168.43.112");
+        InetAddress gwIp = Lan.gatewayFor(clientIp);
+        assertNotNull(gwIp);
+        assertEquals("192.168.43.1", gwIp.getHostAddress());
+        assertNull(Lan.gatewayFor(InetAddress.getByName("192.168.43.1")));
+
+        // 2. Stage 2: FISSURE LT Micro-Fragmentation & Out-of-Order Reassembly
+        java.util.List<byte[]> shortParts = Ble.splitMeshText("Aman Pos1", 1);
+        assertEquals("<=10B text must remain a single unfragmented packet", 1, shortParts.size());
+        Ble ble = new Ble(null);
+        assertArrayEquals("Aman Pos1".getBytes(Hub.UTF8),
+                ble.reassembleMeshBody("Andi", Ble.MESH_TEXT, shortParts.get(0)));
+
+        String longMsg = "Rotasi pos 3 dimulai 10 menit lagi menuju Main Hall";
+        java.util.List<byte[]> frags = Ble.splitMeshText(longMsg, 2);
+        assertTrue("51-byte text must split into 7 fragments", frags.size() > 1 && frags.size() <= 7);
+        for (byte[] frag : frags) {
+            byte[] packed = Ble.packMesh(0x2233, Ble.DEFAULT_TTL, Ble.MESH_TEXT, "Pos 3", frag);
+            assertNotNull(packed);
+            assertTrue("Each fragment must fit in 22-byte BLE service data", packed.length <= 22);
+        }
+        // Feed fragments out of order (reverse order) and verify reassembly only on final piece
+        byte[] assembled = null;
+        for (int i = frags.size() - 1; i >= 0; i--) {
+            assembled = ble.reassembleMeshBody("Pos 3", Ble.MESH_TEXT, frags.get(i));
+            if (i > 0) assertNull("Incomplete fragment set must wait", assembled);
+        }
+        assertNotNull(assembled);
+        assertEquals(longMsg, new String(assembled, Hub.UTF8));
+
+        // 3. Stage 3 & 4: 8 KB Chunked Photo over Low-Bandwidth Multi-Hop + Cross-Transport MESH_RELAY
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        int port = 19149;
+        HubTest.Rec rA = new HubTest.Rec();
+        HubTest.Rec rB = new HubTest.Rec();
+        HubTest.Rec rC = new HubTest.Rec();
+
+        Hub hubA = new Hub("Pos 1", null, rA).port(port);
+        hubA.startServer(lo);
+        Thread.sleep(200);
+
+        Hub hubB = new Hub("Pos 2", null, rB).port(port);
+        hubB.startClient(lo);
+        HubTest.waitFor(rA, "join:Pos 2");
+        HubTest.waitFor(rB, "join:Pos 1");
+
+        final PipedOutputStream bOut = new PipedOutputStream();
+        final PipedInputStream cIn = new PipedInputStream(bOut, 65536);
+        final PipedOutputStream cOut = new PipedOutputStream();
+        final PipedInputStream bIn = new PipedInputStream(cOut, 65536);
+        Closeable rawClose = new Closeable() {
+            @Override public void close() throws IOException {
+                bOut.close(); cOut.close(); cIn.close(); bIn.close();
+            }
+        };
+        Hub hubC = new Hub("Pos 3", null, rC).asOwner(false);
+        hubB.addStreamLink(bIn, bOut, rawClose, true);
+        hubC.addStreamLink(cIn, cOut, rawClose, true);
+        HubTest.waitFor(rA, "join:Pos 3");
+        HubTest.waitFor(rC, "join:Pos 1");
+
+        // Send a 60 KB photo (8 chunks of 8 KB) + live audio from Pos 1 across low-bandwidth hop to Pos 3
+        byte[] photo = new byte[60 * 1024];
+        photo[0] = 42;
+        photo[photo.length - 1] = 99;
+        hubA.sendImage(photo);
+        hubA.sendAudio(new byte[640]);
+        HubTest.waitFor(rC, "audio:Pos 1:640");
+        HubTest.waitFor(rC, "image:Pos 1:" + photo.length);
+
+        // Cross-transport BLE -> Hub MESH_RELAY across 2 hops without blocking direct join
+        Presence sos = new Presence();
+        sos.status = Presence.SOS;
+        hubA.relayMeshPresence("Tim Jauh", sos.encode());
+        hubA.relayMeshText("Tim Jauh", "Butuh medis di sektor B");
+        hubA.relayMeshAnnounce("Komandan", "Prioritaskan jalur evakuasi");
+        HubTest.waitFor(rC, "presence:Tim Jauh:4");
+        HubTest.waitFor(rC, "text:Tim Jauh:Butuh medis di sektor B");
+        HubTest.waitFor(rC, "announce:Komandan:Prioritaskan jalur evakuasi");
+
+        // Verify "Tim Jauh" is NOT blocked by nameTaken when walking closer and joining Hub directly
+        HubTest.Rec rFar = new HubTest.Rec();
+        Hub hubFar = new Hub("Tim Jauh", null, rFar).port(port);
+        hubFar.startClient(lo);
+        HubTest.waitFor(rA, "join:Tim Jauh");
+        HubTest.waitFor(rC, "join:Tim Jauh");
+        assertFalse(rFar.log.contains("rejected"));
+
+        // Verify GPS-independent Welford RF relay selection & fast-reconnect cooldown clear
+        MeshCoordinator coord = new MeshCoordinator();
+        coord.evaluateRssi("Relay Tengah", -62, 1000L);
+        coord.evaluateRssi("Relay Tengah", -63, 2000L);
+        coord.evaluateRssi("Peer Lemah", -88, 1000L);
+        assertEquals("Relay Tengah",
+                coord.selectBestRelay(new Presence(), new java.util.HashMap<String, Presence>()));
+
+        assertTrue(coord.canAutoConnect("lan:Relay Tengah", "Relay Tengah", "Pos 1", null));
+        assertFalse("Cooldown blocks immediate duplicate",
+                coord.canAutoConnect("lan:Relay Tengah", "Relay Tengah", "Pos 1", null));
+        coord.clearPeerCooldown("Relay Tengah");
+        assertTrue("clearPeerCooldown must allow immediate BlueRange fast reconnect",
+                coord.canAutoConnect("lan:Relay Tengah", "Relay Tengah", "Pos 1", null));
+
+        hubFar.stop();
+        hubC.stop();
+        hubB.stop();
+        hubA.stop();
+    }
+
     private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
         MeshAccess.Session sCentral = new MeshAccess.Session(
                 true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);

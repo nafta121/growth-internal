@@ -93,6 +93,19 @@ final class MeshCoordinator {
     }
 
     /**
+     * BlueRange fast-reconnect sustain (ConnectionState::REESTABLISHING):
+     * clears per-peer cooldowns when a link drops unexpectedly so the next beacon reconnects immediately.
+     */
+    void clearPeerCooldown(String peerName) {
+        if (peerName == null) return;
+        autoConnectCooldown.remove("aware:" + peerName);
+        autoConnectCooldown.remove("aware-own:" + peerName);
+        autoConnectCooldown.remove("lan:" + peerName);
+        autoConnectCooldown.remove("lan-own:" + peerName);
+        autoConnectCooldown.remove("bt:" + peerName);
+    }
+
+    /**
      * RuView 3-filter QualityGate (Structural + Shift/Multipath + Welford Coherence):
      * - Passes strong/normal beacons (>= -82 dBm) unless rejected as a sudden multipath spike.
      * - Extends effective BLE range down to -91 dBm when >= 2 samples show low stdDev (<= 4.0 dB).
@@ -236,6 +249,34 @@ final class MeshCoordinator {
             }
         }
         return bestCandidate;
+    }
+
+    /**
+     * Selects the best relay candidate using Welford RF signal coherence when GPS is off or indoors,
+     * falling back from Fresnel-zone geometry when location is unavailable.
+     */
+    String selectBestRelay(Presence myPresence, Map<String, Presence> presences) {
+        String geo = selectBestRelayCandidate(myPresence, presences);
+        return geo != null ? geo : selectBestSignalRelay();
+    }
+
+    String selectBestSignalRelay() {
+        String bestName = null;
+        double bestScore = 0.25;
+        for (Map.Entry<String, LinkStats> e : peerStats.entrySet()) {
+            LinkStats st = e.getValue();
+            if (st == null || st.count < 1 || st.mean < -82.0 || st.mean > -40.0) continue;
+            double sd = st.stdDev();
+            if (sd > MAX_WEAK_STD_DEV) continue;
+            double strength = Math.min(1.0, (st.mean + 91.0) / 45.0);
+            double coherence = 1.0 / (1.0 + sd * 0.25);
+            double score = strength * coherence;
+            if (score > bestScore) {
+                bestScore = score;
+                bestName = e.getKey();
+            }
+        }
+        return bestName;
     }
 
     boolean shouldAcceptMeshText(String senderKey, String text) {

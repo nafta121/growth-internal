@@ -2629,11 +2629,15 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (pkt == null || pkt.sender.equals(myName)) return;
         if (pkt.type == Ble.MESH_PRESENCE) {
             Presence p = Ble.unpackMeshPresence(pkt.body);
-            if (p != null) updateMeshPeerState(pkt.sender, p, true);
+            if (p != null) {
+                updateMeshPeerState(pkt.sender, p, true);
+                if (hub != null && hub.hasPeers()) hub.relayMeshPresence(pkt.sender, p.encode());
+            }
         } else if (pkt.type == Ble.MESH_TEXT) {
             String text = new String(pkt.body, Hub.UTF8).trim();
             if (!text.isEmpty() && shouldAcceptMeshText(pkt.sender, text)) {
                 updateMeshPeerState(pkt.sender, presences.get(pkt.sender), true);
+                if (hub != null && hub.hasPeers()) hub.relayMeshText(pkt.sender, text);
                 addBubble(pkt.sender, text, false);
                 notifyAway(Alerts.CH_MESSAGES, pkt.sender, text);
             }
@@ -2641,6 +2645,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             String text = new String(pkt.body, Hub.UTF8).trim();
             if (!text.isEmpty() && shouldAcceptMeshText("ann:" + pkt.sender, text)) {
                 updateMeshPeerState(pkt.sender, presences.get(pkt.sender), true);
+                if (hub != null && hub.hasPeers()) hub.relayMeshAnnounce(pkt.sender, text);
                 addAnnouncement(pkt.sender, text);
                 notifyAway(Alerts.CH_MESSAGES, "Instruksi dari " + pkt.sender, text);
                 vibrate(new long[] {0, 400});
@@ -2919,9 +2924,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void askBridge() {
-        String bestRelay = MeshCoordinator.selectBestRelayCandidate(buildPresence(), presences);
+        String bestRelay = coordinator.selectBestRelay(buildPresence(), presences);
         String fresnelNote = bestRelay != null
-                ? "\n\nSaran posisi (Zona Fresnel): " + bestRelay + " berada di jalur tengah paling efektif."
+                ? "\n\nSaran posisi (Zona Fresnel / Sinyal): " + bestRelay + " berada di jalur tengah paling efektif."
                 : "";
         new AlertDialog.Builder(this)
                 .setTitle("Jadi jembatan (percobaan)")
@@ -3181,6 +3186,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 if (hub == null) return;
+                coordinator.clearPeerCooldown(name);
                 members.remove(name);
                 awarePeers.remove(name);
                 lanPeers.remove(name);
@@ -3264,6 +3270,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 if (!shouldAcceptMeshText(from, text)) return;
+                if (ble != null) ble.broadcastMeshText(from, text);
                 addBubble(from, text, false);
                 notifyAway(Alerts.CH_MESSAGES, from, text);
             }
@@ -3277,11 +3284,17 @@ public class MainActivity extends Activity implements Hub.Callback {
                 if (hub == null) return;
                 Presence old = presences.put(from, p);
                 boolean wasSos = old != null && old.status == Presence.SOS;
-                if (p.status == Presence.SOS && !wasSos) {
-                    sosSilenced.remove(from);
-                    addSystemMessage(from + " mengirim Panggilan Prioritas");
-                    notifyAway(Alerts.CH_SOS, "PRIORITAS: " + from + " butuh supporting/backup!", whereIs(p));
-                } else if (wasSos && p.status != Presence.SOS) {
+                if (p.status == Presence.SOS) {
+                    if (!members.containsKey(from)) bleSosNames.add(from);
+                    if (!wasSos) {
+                        sosSilenced.remove(from);
+                        if (ble != null) ble.broadcastMeshPresence(from, p);
+                        addSystemMessage(from + " mengirim Panggilan Prioritas");
+                        notifyAway(Alerts.CH_SOS, "PRIORITAS: " + from + " butuh supporting/backup!", whereIs(p));
+                    }
+                } else if (wasSos) {
+                    bleSosNames.remove(from);
+                    if (ble != null) ble.broadcastMeshPresence(from, p);
                     addSystemMessage(from + " mengakhiri Panggilan Prioritas");
                 }
                 refreshMembers();
@@ -3295,6 +3308,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 if (!shouldAcceptMeshText("ann:" + from, text)) return;
+                if (ble != null) ble.broadcastMeshAnnounce(from, text);
                 addAnnouncement(from, text);
                 notifyAway(Alerts.CH_MESSAGES, "Instruksi dari " + from, text);
                 vibrate(new long[] {0, 400});
