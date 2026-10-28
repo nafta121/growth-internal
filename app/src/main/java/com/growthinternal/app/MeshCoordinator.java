@@ -193,6 +193,14 @@ final class MeshCoordinator {
         return centrality * clearance;
     }
 
+    static double distanceMeters(Presence a, Presence b) {
+        if (a == null || b == null || !a.hasLocation || !b.hasLocation) return 0.0;
+        double midLatRad = Math.toRadians((a.lat + b.lat) * 0.5);
+        double dx = (b.lon - a.lon) * 111319.5 * Math.cos(midLatRad);
+        double dy = (b.lat - a.lat) * 111132.0;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
     /**
      * Selects the member name with the highest Fresnel corridor placement score
      * between myPresence and the furthest/SOS peer in presences, or null if no relay is needed.
@@ -203,11 +211,11 @@ final class MeshCoordinator {
         }
         String targetName = null;
         Presence targetPresence = null;
-        float maxDist = 0f;
+        double maxDist = 0.0;
         for (Map.Entry<String, Presence> e : presences.entrySet()) {
             Presence p = e.getValue();
             if (p == null || !p.hasLocation) continue;
-            float d = myPresence.distanceTo(p);
+            double d = distanceMeters(myPresence, p);
             boolean priority = p.status == Presence.SOS && (targetPresence == null || targetPresence.status != Presence.SOS);
             if (priority || ((targetPresence == null || targetPresence.status == p.status) && d > maxDist)) {
                 maxDist = d;
@@ -215,7 +223,7 @@ final class MeshCoordinator {
                 targetPresence = p;
             }
         }
-        if (targetPresence == null || maxDist < 50f) return null;
+        if (targetPresence == null || maxDist < 50.0) return null;
 
         String bestCandidate = null;
         double bestScore = 0.25;
