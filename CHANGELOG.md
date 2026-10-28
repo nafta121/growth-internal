@@ -2,6 +2,19 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.14.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Seamless Auto-Connect dalam Radius Jangkauan)
+- **Koneksi Otomatis Tanpa Ketuk & Tanpa Popup (*Zero-Touch Auto-Connect*) (`MainActivity`, `Lan`, `Ble`, `Bt`)**:
+  - Menghubungkan perangkat Tim secara otomatis begitu masuk dalam radius jangkauan melalui **Hotspot/Wi‑Fi Lokal (`Lan`)**, **Bluetooth Insecure RFCOMM + BLE Beacon (`Ble` + `Bt`)**, maupun *fallback* **Wi‑Fi Direct** tanpa perlu menekan tombol `"Hubungkan"` dan tanpa PIN.
+- **Resolusi Anti-*Split-Brain* & *Deterministic Tie-Breaker* (`MainActivity.autoConnectDecision`, `Lan.Peer.memberCount`, `Ble.Beacon.inGroup`)**:
+  - Menyematkan jumlah anggota grup (`memberCount`) pada paket UDP `Lan` serta bendera pemilik grup aktif (`inGroup`, bit `0x40`) pada *Service Data* `Ble` 20-byte.
+  - Apabila dua perangkat tunggal bertemu di lapangan, penentu pemilik otomatis (*deterministic tie-breaker*) memilih satu perangkat menjadi `Owner` dan perangkat lainnya langsung bergabung sebagai `Client`. Apabila pemilik grup kosong (`memberCount == 1`) mendeteksi grup aktif yang lebih besar (`memberCount > 1`), perangkat otomatis melebur ke grup yang lebih besar sehingga seluruh Tim menyatu dalam satu saluran tunggal.
+- **Filter Kekuatan Sinyal (*RSSI Threshold*) & *Cooldown* Anti-*Flapping* (`Ble.MIN_AUTO_RSSI`, `MainActivity.canAutoConnect`)**:
+  - Membatasi pemicu *auto-connect* Bluetooth/BLE hanya pada sinyal stabil (`RSSI >= -82 dBm`) dengan jeda *cooldown* `12 detik` per perangkat dan masa tenang `15 detik` setelah pengguna menekan `"Keluar"`, sehingga mencegah putus-nyambung berulang (*connection flapping*) di tepi jangkauan sinyal.
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan pengujian unit `autoConnectDecisionResolvesSplitBrainAndTieBreaker` serta memverifikasi *round-trip* atribut `inGroup`, `rssi`, dan `memberCount` pada `Ble` dan `Lan`.
+
 ## [0.13.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Arsitektur Multi-Transport Seamless Offline)

@@ -63,29 +63,45 @@ public class AdpcmTest {
         p.lat = -6.59714f;
         p.lon = 106.80603f;
 
-        byte[] packed = Ble.pack("PIC_Lapangan_Utama", p);
+        byte[] packed = Ble.pack("PIC_Lapangan_Utama", p, true);
         assertTrue("BLE service data must fit in 20 bytes", packed.length <= 20);
 
-        Ble.Beacon b = Ble.unpack(packed);
+        Ble.Beacon b = Ble.unpack(packed, -68);
         assertNotNull(b);
         assertEquals("PIC_Lapang", b.name);
         assertEquals(Presence.SOS, b.presence.status);
         assertEquals(87, b.presence.battery);
         assertTrue(b.presence.charging);
         assertTrue(b.presence.hasLocation);
+        assertTrue(b.inGroup);
+        assertEquals(-68, b.rssi);
         assertEquals(-6.59714, b.presence.lat, 0.0001);
         assertEquals(106.80603, b.presence.lon, 0.0001);
     }
 
     @Test public void lanDiscoveryPacketRoundTrip() throws Exception {
         InetAddress addr = InetAddress.getByName("192.168.43.10");
-        byte[] pkt = Lan.encodePacket("Pos 1 - Raka", 8988, true);
+        byte[] pkt = Lan.encodePacket("Pos 1 - Raka", 8988, true, 4);
         Lan.Peer peer = Lan.decodePacket(pkt, pkt.length, addr);
         assertNotNull(peer);
         assertEquals("Pos 1 - Raka", peer.name);
         assertEquals(addr, peer.address);
         assertEquals(8988, peer.port);
         assertTrue(peer.inGroup);
+        assertEquals(4, peer.memberCount);
+    }
+
+    @Test public void autoConnectDecisionResolvesSplitBrainAndTieBreaker() {
+        // 1. Standalone phone meets an active group owner -> auto-join (1)
+        assertEquals(1, MainActivity.autoConnectDecision(false, 0, "Andi", true, 2, "Zaki"));
+        // 2. Two standalone phones meet -> lexicographically smaller name becomes owner (2)
+        assertEquals(2, MainActivity.autoConnectDecision(false, 0, "Andi", false, 0, "Budi"));
+        assertEquals(0, MainActivity.autoConnectDecision(false, 0, "Budi", false, 0, "Andi"));
+        // 3. Split-brain: two empty owners (count=1) meet -> larger name yields & joins smaller name (1)
+        assertEquals(1, MainActivity.autoConnectDecision(true, 1, "Budi", true, 1, "Andi"));
+        assertEquals(0, MainActivity.autoConnectDecision(true, 1, "Andi", true, 1, "Budi"));
+        // 4. Empty owner meets an owner with real members (count=3 > 1) -> empty owner joins larger group (1)
+        assertEquals(1, MainActivity.autoConnectDecision(true, 1, "Andi", true, 3, "Zaki"));
     }
 
     @Test public void crossTransportRelayBetweenTcpAndBluetoothStream() throws Exception {

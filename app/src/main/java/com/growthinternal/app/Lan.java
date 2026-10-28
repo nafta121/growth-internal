@@ -28,12 +28,18 @@ final class Lan {
         final InetAddress address;
         final int port;
         final boolean inGroup;
+        final int memberCount;
 
         Peer(String name, InetAddress address, int port, boolean inGroup) {
+            this(name, address, port, inGroup, inGroup ? 1 : 0);
+        }
+
+        Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount) {
             this.name = name;
             this.address = address;
             this.port = port;
             this.inGroup = inGroup;
+            this.memberCount = memberCount;
         }
     }
 
@@ -78,10 +84,14 @@ final class Lan {
     }
 
     void announce(final String name, final int hubPort, final boolean inGroup) {
+        announce(name, hubPort, inGroup, inGroup ? 1 : 0);
+    }
+
+    void announce(final String name, final int hubPort, final boolean inGroup, final int memberCount) {
         if (name == null || name.trim().isEmpty()) return;
         new Thread(new Runnable() {
             @Override public void run() {
-                byte[] data = encodePacket(name, hubPort, inGroup);
+                byte[] data = encodePacket(name, hubPort, inGroup, memberCount);
                 DatagramSocket s = socket;
                 boolean tempSocket = false;
                 try {
@@ -112,8 +122,13 @@ final class Lan {
     }
 
     static byte[] encodePacket(String name, int hubPort, boolean inGroup) {
+        return encodePacket(name, hubPort, inGroup, inGroup ? 1 : 0);
+    }
+
+    static byte[] encodePacket(String name, int hubPort, boolean inGroup, int memberCount) {
         String clean = name.replace('\n', ' ').trim();
-        String msg = MAGIC + "\n" + clean + "\n" + hubPort + "\n" + (inGroup ? "1" : "0");
+        String msg = MAGIC + "\n" + clean + "\n" + hubPort + "\n"
+                + (inGroup ? "1" : "0") + "\n" + Math.max(0, memberCount);
         return msg.getBytes(UTF8);
     }
 
@@ -132,7 +147,11 @@ final class Lan {
         }
         if (port <= 0 || port > 65535) return null;
         boolean inGroup = "1".equals(parts[3].trim());
-        return new Peer(name, sender, port, inGroup);
+        int count = inGroup ? 1 : 0;
+        if (parts.length >= 5) {
+            try { count = Integer.parseInt(parts[4].trim()); } catch (NumberFormatException ignored) {}
+        }
+        return new Peer(name, sender, port, inGroup, count);
     }
 
     static boolean isLocalAddress(InetAddress addr) {

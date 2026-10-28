@@ -25,6 +25,7 @@ import java.nio.charset.Charset;
 final class Ble {
     static final ParcelUuid SERVICE_UUID =
             ParcelUuid.fromString("0000fd91-0000-1000-8000-00805f9b34fb");
+    static final int MIN_AUTO_RSSI = -82;
     private static final Charset UTF8 = Charset.forName("UTF-8");
     private static final int HEADER_LEN = 10;
     private static final int MAX_NAME_BYTES = 10;
@@ -32,10 +33,14 @@ final class Ble {
     static final class Beacon {
         final String name;
         final Presence presence;
+        final boolean inGroup;
+        final int rssi;
 
-        Beacon(String name, Presence presence) {
+        Beacon(String name, Presence presence, boolean inGroup, int rssi) {
             this.name = name;
             this.presence = presence;
+            this.inGroup = inGroup;
+            this.rssi = rssi;
         }
     }
 
@@ -66,7 +71,7 @@ final class Ble {
             if (rec == null) return;
             byte[] data = rec.getServiceData(SERVICE_UUID);
             if (data == null) return;
-            Beacon b = unpack(data);
+            Beacon b = unpack(data, result.getRssi());
             if (b != null && listener != null) {
                 listener.onBeacon(b, result.getDevice());
             }
@@ -99,7 +104,7 @@ final class Ble {
         }
     }
 
-    void updateAdvertise(String name, Presence p) {
+    void updateAdvertise(String name, Presence p, boolean inGroup) {
         if (adapter == null || name == null || name.trim().isEmpty()) return;
         try {
             if (!adapter.isEnabled()) return;
@@ -109,7 +114,7 @@ final class Ble {
                 try { advertiser.stopAdvertising(advertiseCallback); } catch (RuntimeException ignored) {}
                 advertising = false;
             }
-            byte[] payload = pack(name, p != null ? p : new Presence());
+            byte[] payload = pack(name, p != null ? p : new Presence(), inGroup);
             boolean urgent = p != null && p.status == Presence.SOS;
             AdvertiseSettings settings = new AdvertiseSettings.Builder()
                     .setAdvertiseMode(urgent
@@ -140,6 +145,10 @@ final class Ble {
     }
 
     static byte[] pack(String name, Presence p) {
+        return pack(name, p, false);
+    }
+
+    static byte[] pack(String name, Presence p, boolean inGroup) {
         Presence pr = p != null ? p : new Presence();
         byte[] rawName = (name != null ? name.trim() : "").getBytes(UTF8);
         int nameLen = Math.min(rawName.length, MAX_NAME_BYTES);
@@ -150,7 +159,8 @@ final class Ble {
         ByteBuffer buf = ByteBuffer.allocate(HEADER_LEN + nameLen);
         int flags = (pr.status & 0x0F)
                 | (pr.hasLocation ? 0x10 : 0)
-                | (pr.charging ? 0x20 : 0);
+                | (pr.charging ? 0x20 : 0)
+                | (inGroup ? 0x40 : 0);
         buf.put((byte) flags);
         buf.put((byte) pr.battery);
         buf.putFloat(pr.hasLocation ? (float) pr.lat : 0f);
@@ -160,6 +170,10 @@ final class Ble {
     }
 
     static Beacon unpack(byte[] data) {
+        return unpack(data, -50);
+    }
+
+    static Beacon unpack(byte[] data, int rssi) {
         if (data == null || data.length <= HEADER_LEN) return null;
         ByteBuffer buf = ByteBuffer.wrap(data);
         int flags = buf.get() & 0xFF;
@@ -172,12 +186,13 @@ final class Ble {
         p.status = flags & 0x0F;
         p.hasLocation = (flags & 0x10) != 0;
         p.charging = (flags & 0x20) != 0;
+        boolean inGroup = (flags & 0x40) != 0;
         p.battery = battery;
         if (p.hasLocation) {
             p.lat = lat;
             p.lon = lon;
             p.accuracy = 15f;
         }
-        return new Beacon(name, p);
+        return new Beacon(name, p, inGroup, rssi);
     }
 }
