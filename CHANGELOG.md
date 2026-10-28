@@ -2,6 +2,20 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.21.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Peningkatan Konektivitas & Jangkauan Ala RuView)
+- **Tahap 1 — *Welford RunningStats & 3-Filter Quality Gate* (`MeshCoordinator`, `MainActivity`)**:
+  - Menambahkan pelacak statistik sinyal online berbasis algoritma Welford (`LinkStats`: rata-rata `mean`, simpangan baku `stdDev`, dan *EMA drift*) serta gerbang kualitas 3-lapis (`evaluateRssi`): memperluas jangkauan efektif *auto-connect* BLE L2CAP & `MeshAccess` (`0xFE12`) dari `-82 dBm` hingga **`-91 dBm`** untuk sinyal jarak jauh yang stabil (*coherent distant link*), sekaligus menahan lonjakan pantulan sesaat (*multipath spike* `> 10 dB`).
+- **Tahap 2 — *Distance-Weighted TDM Slot Scheduling & Opportunistic Suppression* (`Ble`)**:
+  - Mengadopsi penjadwalan slot waktu *relay* berbasis jarak (`computeRelayDelayMs`) pada *BLE Flood Mesh* (`0xFD92`): perangkat di tepi jangkauan terjauh (`<= -80 dBm`) memperoleh slot prioritas pertama (`15–40 ms`) untuk memaksimalkan jarak jangkauan multi-hop, sementara perangkat dekat pengirim (`> -65 dBm`) dijadwalkan di akhir (`125–200 ms`) dan otomatis menekan *relay* ganda (`overheardCount >= 2`) guna mencegah *broadcast storm*.
+- **Tahap 3 — *Fresnel-Zone Clearance & Relay Placement Advisor* (`MeshCoordinator`, `MainActivity`)**:
+  - Mengimplementasikan rumus geometri Zona Fresnel pertama 2.4 GHz (`fresnelRadiusMeters`, `relayPlacementScore`, dan `selectBestRelayCandidate`) untuk mengevaluasi posisi anggota di koridor garis pandang antara pos yang berjauhan/SOS serta menampilkan saran posisi jembatan paling efektif pada dialog jembatan.
+- **Tahap 4 — *Proactive Make-Before-Break Multi-Transport Handover* (`Hub`, `Link`, `MeshCoordinator`, `MainActivity`)**:
+  - Menambahkan deteksi *negative signal drift* (`shouldHandoverToBle`) dan pergantian sambungan lintas transport tanpa putus (*Make-Before-Break* di `Hub`) antara jalur berkecepatan tinggi (Wi‑Fi Aware / Hotspot LAN) dan jalur jangkauan jauh (BLE L2CAP / `MeshAccess`), sehingga perangkat otomatis naik kelas ke Wi‑Fi saat mendekat dan beralih ke BLE sebelum Wi‑Fi terputus saat menjauh tanpa kehilangan anggota atau memutus komunikasi.
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan pengujian unit `ruviewConnectivityQualityGateTdmFresnelAndHandover` yang memverifikasi ke-4 tahap peningkatan konektivitas dan *handover* lintas transport secara *end-to-end*.
+
 ## [0.20.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Auto-Update Internal dari GitHub Releases & Kepatuhan Play Protect)

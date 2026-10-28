@@ -2512,12 +2512,13 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (hub == null) {
             setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
         }
-        if (hub != null && hub.hasMember(peer.name)) return;
+        boolean upgradeFromBle = hub != null && hub.hasMember(peer.name) && hub.hasLowBandwidthLink(peer.name);
+        if (hub != null && hub.hasMember(peer.name) && !upgradeFromBle) return;
         int myCid = activeClusterId();
         int action = autoConnectDecision(hub != null && hub.hasPeers(), groupMemberCount(), myName,
                 myCid, peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
         boolean initiate = action == 1
-                || (!peer.inGroup && (myCid == 0 || myCid != peer.clusterId)
+                || ((upgradeFromBle || !peer.inGroup) && (upgradeFromBle || myCid == 0 || myCid != peer.clusterId)
                         && myName.compareTo(peer.name) > 0);
         if (initiate && canAutoConnect("aware:" + peer.name, peer.name)) {
             connectAware(peer);
@@ -2549,14 +2550,16 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (hub == null) {
             setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
         }
-        if (hub != null && hub.hasMember(peer.name)) return;
+        boolean upgradeFromBle = hub != null && hub.hasMember(peer.name) && hub.hasLowBandwidthLink(peer.name);
+        if (hub != null && hub.hasMember(peer.name) && !upgradeFromBle) return;
         if (awarePeers.containsKey(peer.name)) return;
-        if (activeGroupOwner() && !peer.inGroup && lan != null) {
+        if (activeGroupOwner() && !peer.inGroup && !upgradeFromBle && lan != null) {
             lan.announce(myName, hub.port(), true, groupMemberCount(), activeClusterId());
             return;
         }
-        int action = autoConnectDecision(hub != null && hub.hasPeers(), groupMemberCount(), myName,
-                activeClusterId(), peer.inGroup, peer.memberCount, peer.name, peer.clusterId);
+        int action = upgradeFromBle ? 1 : autoConnectDecision(hub != null && hub.hasPeers(),
+                groupMemberCount(), myName, activeClusterId(), peer.inGroup, peer.memberCount,
+                peer.name, peer.clusterId);
         if ((action == 1 && canAutoConnect("lan:" + peer.name, peer.name))
                 || (action == 2 && canAutoConnect("lan-own:" + peer.name, peer.name))) {
             connectLan(peer);
@@ -2602,13 +2605,18 @@ public class MainActivity extends Activity implements Hub.Callback {
             if (beacon.psm > 0) btPsms.put(device.getAddress(), beacon.psm);
             refreshPeers();
         }
-        updateMeshPeerState(beacon.name, beacon.presence, beacon.rssi >= Ble.MIN_AUTO_RSSI);
+        boolean qualityOk = coordinator.evaluateRssi(beacon.name, beacon.rssi);
+        updateMeshPeerState(beacon.name, beacon.presence, qualityOk);
         int myCid = activeClusterId();
         boolean sameCluster = myCid != 0 && myCid == beacon.clusterId;
-        if (device != null && !sameCluster && beacon.rssi >= Ble.MIN_AUTO_RSSI
+        boolean makeBeforeBreak = hub != null && hub.hasMember(beacon.name)
+                && !hub.hasLowBandwidthLink(beacon.name)
+                && coordinator.shouldHandoverToBle(beacon.name);
+        boolean unjoined = !sameCluster
                 && !awarePeers.containsKey(beacon.name)
                 && !lanPeers.containsKey(beacon.name)
-                && (hub == null || !hub.hasMember(beacon.name))) {
+                && (hub == null || !hub.hasMember(beacon.name));
+        if (device != null && qualityOk && (unjoined || makeBeforeBreak)) {
             boolean preferConnect = beacon.inGroup || myName.compareTo(beacon.name) > 0
                     || (hub != null && !hub.hasPeers());
             if (preferConnect && canAutoConnect("bt:" + beacon.name, beacon.name)) {
@@ -2911,13 +2919,18 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void askBridge() {
+        String bestRelay = MeshCoordinator.selectBestRelayCandidate(buildPresence(), presences);
+        String fresnelNote = bestRelay != null
+                ? "\n\nSaran posisi (Zona Fresnel): " + bestRelay + " berada di jalur tengah paling efektif."
+                : "";
         new AlertDialog.Builder(this)
                 .setTitle("Jadi jembatan (percobaan)")
                 .setMessage("HP ini akan membuat grup baru untuk HP yang lebih jauh, sambil tetap "
                         + "tersambung ke grup sekarang lewat Wi‑Fi. Semua anggota di kedua sisi "
                         + "saling mendengar dan melihat chat.\n\n"
                         + "Letakkan HP ini di tengah, di antara grup dan HP yang jauh. "
-                        + "Android mungkin meminta izin menyambung ke Wi‑Fi \"DIRECT-…\"; pilih Sambungkan.")
+                        + "Android mungkin meminta izin menyambung ke Wi‑Fi \"DIRECT-…\"; pilih Sambungkan."
+                        + fresnelNote)
                 .setPositiveButton("Mulai", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) { startBridge(); }
                 })
@@ -3169,6 +3182,8 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 if (hub == null) return;
                 members.remove(name);
+                awarePeers.remove(name);
+                lanPeers.remove(name);
                 talkers.remove(name);
                 presences.remove(name);
                 voice.drop(name);

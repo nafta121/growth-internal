@@ -47,6 +47,7 @@ final class Link {
     // True for a link to or from a bridge, which carries frames of many senders.
     volatile boolean relay;
     volatile boolean sentBridge;
+    volatile Link replacedLink;
 
     Link(Socket socket, Listener listener) throws IOException {
         this(configure(socket).getInputStream(), socket.getOutputStream(), socket, false, listener);

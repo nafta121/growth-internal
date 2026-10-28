@@ -131,6 +131,16 @@ final class Hub implements Link.Listener {
         synchronized (members) { return members.containsKey(name); }
     }
 
+    boolean hasLowBandwidthLink(String name) {
+        if (name == null) return false;
+        for (Link l : links) {
+            if (l.lowBandwidth && (name.equals(l.peerName) || l.behind.contains(name))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     boolean isOwner() { return owner; }
 
     Hub asOwner(boolean isOwner) {
@@ -343,6 +353,13 @@ final class Hub implements Link.Listener {
     }
 
     @Override public void onFrame(Link from, Frame f) {
+        if (f.type != Frame.HELLO) {
+            Link old = from.replacedLink;
+            if (old != null) {
+                from.replacedLink = null;
+                old.close();
+            }
+        }
         if (f.type == Frame.HELLO) {
             boolean multiHop = owner || links.size() > 1;
             boolean directJoin;
@@ -351,7 +368,14 @@ final class Hub implements Link.Listener {
             synchronized (members) {
                 directJoin = (from.peerName == null);
                 if (directJoin) {
-                    if (multiHop && nameTaken(f.sender)) {
+                    Link handoverOld = findHandoverLink(from, f.sender);
+                    if (handoverOld != null) {
+                        links.remove(handoverOld);
+                        from.behind.addAll(handoverOld.behind);
+                        handoverOld.peerName = null;
+                        handoverOld.behind.clear();
+                        from.replacedLink = handoverOld;
+                    } else if (multiHop && nameTaken(f.sender)) {
                         if (from == uplink) {
                             cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
                             from.close();
@@ -373,7 +397,7 @@ final class Hub implements Link.Listener {
                             }
                         }
                     }
-                    if (multiHop) {
+                    if (multiHop || handoverOld != null) {
                         from.send(buildClusterFrame());
                         // Everyone we know of, including phones behind bridges/relays.
                         for (Map.Entry<String, byte[]> e : members.entrySet()) {
@@ -504,10 +528,15 @@ final class Hub implements Link.Listener {
     }
 
     @Override public void onClosed(Link link) {
-        links.remove(link);
+        Link old = link.replacedLink;
+        if (old != null) {
+            link.replacedLink = null;
+            old.close();
+        }
+        boolean wasActive = links.remove(link);
         boolean wasUplink = link == uplink;
         if (wasUplink) uplink = null;
-        if (stopped) return;
+        if (stopped || (!wasActive && !wasUplink)) return;
         lossCounter++;
         reportedClusterSize = 0;
         if (wasUplink) cb.onUplink(false);
@@ -521,6 +550,7 @@ final class Hub implements Link.Listener {
             return;
         }
         for (String name : new ArrayList<String>(link.behind)) {
+            if (stillReachable(name)) continue;
             if (owner || !links.isEmpty()) {
                 broadcast(new Frame(Frame.LEAVE, name, null), null);
             }
@@ -534,6 +564,24 @@ final class Hub implements Link.Listener {
         if (!links.isEmpty()) {
             broadcast(buildClusterFrame(), null);
         }
+    }
+
+    private Link findHandoverLink(Link incoming, String sender) {
+        if (incoming == null || sender == null) return null;
+        for (Link l : links) {
+            if (l != incoming && sender.equals(l.peerName) && l.lowBandwidth != incoming.lowBandwidth) {
+                return l;
+            }
+        }
+        return null;
+    }
+
+    private boolean stillReachable(String name) {
+        if (name == null) return false;
+        for (Link l : links) {
+            if (l.behind.contains(name)) return true;
+        }
+        return false;
     }
 
     private boolean nameTaken(String name) {

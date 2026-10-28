@@ -16,8 +16,8 @@ import android.os.Looper;
 import android.os.ParcelUuid;
 
 import java.nio.ByteBuffer;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -100,7 +100,11 @@ final class Ble {
     private final BluetoothAdapter adapter;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Random random = new Random();
-    private final LinkedHashSet<Integer> seenMeshIds = new LinkedHashSet<Integer>();
+    private final Map<Integer, Integer> seenMeshCounts = new LinkedHashMap<Integer, Integer>() {
+        @Override protected boolean removeEldestEntry(Map.Entry<Integer, Integer> eldest) {
+            return size() > MAX_SEEN_IDS;
+        }
+    };
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
     private boolean advertising;
@@ -167,14 +171,20 @@ final class Ble {
             }
             byte[] meshData = rec.getServiceData(MESH_UUID);
             if (meshData != null) {
-                MeshPacket pkt = unpackMesh(meshData);
+                final MeshPacket pkt = unpackMesh(meshData);
+                final int rssi = result.getRssi();
                 if (pkt != null && recordSeenMesh(pkt.msgId)) {
                     if (listener != null) listener.onMesh(pkt);
                     if (pkt.ttl > 1) {
                         final byte[] relayed = packMesh(pkt.msgId, pkt.ttl - 1, pkt.type, pkt.sender, pkt.body);
+                        int delayMs = computeRelayDelayMs(rssi, random.nextInt(26));
                         handler.postDelayed(new Runnable() {
-                            @Override public void run() { advertiseMeshRaw(relayed); }
-                        }, 30 + random.nextInt(150));
+                            @Override public void run() {
+                                // Opportunistic suppression: near nodes skip relay if neighbors already forwarded it
+                                if (rssi > -65 && overheardCount(pkt.msgId) >= 2) return;
+                                advertiseMeshRaw(relayed);
+                            }
+                        }, delayMs);
                     }
                 }
             }
@@ -191,18 +201,33 @@ final class Ble {
         this.adapter = a;
     }
 
+    /**
+     * RuView ADR-029 Distance-Weighted TDM slot assignment:
+     * Outer-edge nodes (<= -80 dBm) get Slot 0 (15..40 ms) to maximize geographic hop reach;
+     * mid-range nodes (-79..-65 dBm) get Slot 1 (55..105 ms);
+     * near nodes (> -65 dBm) get Slot 2 (125..200 ms) and suppress if already overheard.
+     */
+    static int computeRelayDelayMs(int rssi, int jitter) {
+        int j = Math.abs(jitter) % 26;
+        if (rssi <= -80) return 15 + j;
+        if (rssi <= -65) return 55 + j * 2;
+        return 125 + j * 3;
+    }
+
     synchronized boolean recordSeenMesh(int msgId) {
         int id = msgId & 0xFFFF;
-        if (seenMeshIds.contains(id)) return false;
-        if (seenMeshIds.size() >= MAX_SEEN_IDS) {
-            Iterator<Integer> it = seenMeshIds.iterator();
-            if (it.hasNext()) {
-                it.next();
-                it.remove();
-            }
+        Integer prev = seenMeshCounts.get(id);
+        if (prev != null) {
+            seenMeshCounts.put(id, prev + 1);
+            return false;
         }
-        seenMeshIds.add(id);
+        seenMeshCounts.put(id, 1);
         return true;
+    }
+
+    synchronized int overheardCount(int msgId) {
+        Integer c = seenMeshCounts.get(msgId & 0xFFFF);
+        return c != null ? c : 0;
     }
 
     /** Scales BLE scan duty-cycle down while connected so 2.4 GHz airtime stays free for Wi-Fi/L2CAP voice. */

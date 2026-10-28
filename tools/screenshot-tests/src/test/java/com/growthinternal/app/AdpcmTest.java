@@ -639,6 +639,125 @@ public class AdpcmTest {
         }
     }
 
+    @Test public void ruviewConnectivityQualityGateTdmFresnelAndHandover() throws Exception {
+        MeshCoordinator coord = new MeshCoordinator();
+        long t0 = 100000L;
+
+        // 1. Stage 1: Welford RunningStats & 3-Filter QualityGate
+        // Strong/normal signal (>= -82 dBm) passes immediately
+        assertTrue(coord.evaluateRssi("NearPeer", -78, t0));
+
+        // Coherent distant peer (-88 dBm): extends range below -82 dBm down to -91 dBm after 2 stable samples
+        assertFalse("First weak sample (-88 dBm) awaits coherence evidence",
+                coord.evaluateRssi("FarCoherent", -88, t0));
+        assertTrue("Second coherent weak sample (-87 dBm, stdDev < 4.0) must pass QualityGate",
+                coord.evaluateRssi("FarCoherent", -87, t0 + 500));
+
+        // Multipath spike rejection: out-of-range noise (-95, -94) jumping suddenly to -80 dBm (> 10 dB shift)
+        assertFalse(coord.evaluateRssi("MultipathNoise", -95, t0));
+        assertFalse(coord.evaluateRssi("MultipathNoise", -94, t0 + 500));
+        assertFalse("Sudden multipath reflection spike (> 10 dB shift) must be blocked",
+                coord.evaluateRssi("MultipathNoise", -80, t0 + 1000));
+
+        // Incoherent noisy weak peer (-95, -83 -> stdDev = 8.48 > 4.0 dB) must be blocked
+        assertFalse(coord.evaluateRssi("NoisyWeak", -95, t0));
+        assertFalse("High-variance weak link must be blocked by Coherence filter",
+                coord.evaluateRssi("NoisyWeak", -83, t0 + 500));
+
+        // 2. Stage 2: Distance-Weighted TDM Slot Scheduling & Duplicate Relay Suppression
+        int edgeDelay = Ble.computeRelayDelayMs(-88, 10);
+        int midDelay = Ble.computeRelayDelayMs(-72, 10);
+        int nearDelay = Ble.computeRelayDelayMs(-52, 10);
+        assertTrue("Edge node must get earliest TDM slot (15..40 ms)", edgeDelay >= 15 && edgeDelay <= 40);
+        assertTrue("Mid node must get middle TDM slot (55..105 ms)", midDelay >= 55 && midDelay <= 105);
+        assertTrue("Near node must get latest TDM slot (125..200 ms)", nearDelay >= 125 && nearDelay <= 200);
+        assertTrue(edgeDelay < midDelay && midDelay < nearDelay);
+
+        Ble ble = new Ble(null);
+        assertTrue(ble.recordSeenMesh(0x4321));
+        assertEquals(1, ble.overheardCount(0x4321));
+        assertFalse(ble.recordSeenMesh(0x4321));
+        assertEquals("Overheard duplicate relay increments count for suppression", 2, ble.overheardCount(0x4321));
+
+        // 3. Stage 3: Fresnel-Zone Clearance & Relay Placement Advisor
+        // F1 at d1=100m, d2=100m, lambda=0.125m -> sqrt(0.125 * 10000 / 200) = sqrt(6.25) = 2.5m
+        assertEquals(2.5, MeshCoordinator.fresnelRadiusMeters(100.0, 100.0), 0.01);
+
+        Presence basecamp = new Presence();
+        basecamp.hasLocation = true;
+        basecamp.lat = -6.200000;
+        basecamp.lon = 106.800000;
+
+        Presence valleySos = new Presence();
+        valleySos.hasLocation = true;
+        valleySos.status = Presence.SOS;
+        valleySos.lat = -6.200000;
+        valleySos.lon = 106.802000; // ~222m East
+
+        Presence ridgeMid = new Presence();
+        ridgeMid.hasLocation = true;
+        ridgeMid.lat = -6.200000;
+        ridgeMid.lon = 106.801000; // Exact midpoint in Fresnel corridor
+
+        Presence offCorridor = new Presence();
+        offCorridor.hasLocation = true;
+        offCorridor.lat = -6.201500; // ~166m South of corridor
+        offCorridor.lon = 106.801000;
+
+        double midScore = MeshCoordinator.relayPlacementScore(basecamp, valleySos, ridgeMid);
+        double offScore = MeshCoordinator.relayPlacementScore(basecamp, valleySos, offCorridor);
+        assertTrue("Midpoint node in Fresnel corridor must score > 0.95", midScore > 0.95);
+        assertTrue("Off-corridor node must score much lower than midpoint", offScore < 0.20);
+
+        java.util.Map<String, Presence> map = new java.util.HashMap<String, Presence>();
+        map.put("Pos Lembah", valleySos);
+        map.put("Pos Bukit", ridgeMid);
+        map.put("Pos Samping", offCorridor);
+        assertEquals("Pos Bukit", MeshCoordinator.selectBestRelayCandidate(basecamp, map));
+
+        // 4. Stage 4: Proactive Make-Before-Break Multi-Transport Handover
+        // Simulate degrading signal: -76 -> -81 -> -85 dBm (emaDrift < -2.0 dB at <= -82 dBm)
+        coord.evaluateRssi("Node B", -76, t0);
+        coord.evaluateRssi("Node B", -81, t0 + 1000);
+        coord.evaluateRssi("Node B", -85, t0 + 2000);
+        assertTrue("Degrading signal into weak zone must trigger Make-Before-Break BLE handover",
+                coord.shouldHandoverToBle("Node B"));
+
+        // Verify live Hub seamless cross-transport handover (BLE lowBandwidth <-> Wi-Fi TCP)
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        HubTest.Rec rA = new HubTest.Rec();
+        HubTest.Rec rB = new HubTest.Rec();
+        Hub hubA = new Hub("Node A", null, rA).asOwner(true).port(9125);
+        Hub hubB = new Hub("Node B", null, rB).asOwner(false).port(9125);
+        hubA.startServer(lo);
+        Thread.sleep(200);
+
+        // Start on BLE MeshAccess pipe (lowBandwidth = true)
+        MeshAccess.Pipe[] blePipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubA.addStreamLink(blePipes[0].in, blePipes[0].out, blePipes[0], true);
+        hubB.addStreamLink(blePipes[1].in, blePipes[1].out, blePipes[1], true);
+        HubTest.waitFor(rA, "join:Node B");
+        HubTest.waitFor(rB, "join:Node A");
+        assertTrue(hubA.hasLowBandwidthLink("Node B"));
+        assertTrue("canAutoConnect must allow upgrading BLE peer to LAN/Aware",
+                coord.canAutoConnect("lan:Node B", "Node B", "Node A", hubA));
+
+        // Upgrade to high-speed TCP link (lowBandwidth = false) without dropping member
+        hubB.connectPeer(lo, 9125, null);
+        for (int i = 0; i < 40 && hubA.hasLowBandwidthLink("Node B"); i++) {
+            Thread.sleep(50);
+        }
+        assertFalse("BLE link must be seamlessly replaced by TCP link", hubA.hasLowBandwidthLink("Node B"));
+        assertFalse("Handover must never emit member left event", rA.log.contains("left:Node B"));
+        assertFalse("Handover must never reject peer", rB.log.contains("rejected"));
+
+        hubB.sendText("seamless-upgrade");
+        HubTest.waitFor(rA, "text:Node B:seamless-upgrade");
+
+        hubB.stop();
+        hubA.stop();
+    }
+
     private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
         MeshAccess.Session sCentral = new MeshAccess.Session(
                 true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);
