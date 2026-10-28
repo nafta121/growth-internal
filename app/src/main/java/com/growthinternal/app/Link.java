@@ -117,7 +117,10 @@ final class Link {
                     f = vital.poll();
                     if (f == null) f = queue.poll();
                     if (f == null) f = bulk.poll();
-                    if (f == null) continue;
+                    if (f == null) {
+                        out.flush();
+                        continue;
+                    }
                 }
                 if (f == null) f = new Frame(Frame.PING, "", null);
                 if ((f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM)
@@ -128,7 +131,7 @@ final class Link {
                 out.writeUTF(f.sender);
                 out.writeInt(f.payload.length);
                 out.write(f.payload);
-                if (vital.isEmpty() && queue.isEmpty()) out.flush();
+                if (vital.isEmpty() && (queue.isEmpty() || queue.peek() == WAKE)) out.flush();
             }
         } catch (InterruptedException ignored) {
         } catch (IOException e) {
