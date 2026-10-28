@@ -2,6 +2,22 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.15.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Wi‑Fi Aware + Bluetooth Mesh Network + Multi-Hop Relay Otomatis)
+- **Prioritas 1: Wi‑Fi Aware / NAN Tanpa Popup (`Aware`, API 26+)**:
+  - Menambahkan modul `Aware.java` berbasis **Wi‑Fi Aware (Neighbor Awareness Networking)** yang mempublikasikan dan berlangganan layanan `"growthinternal"` di udara serta membangun jalur data IPv6 berkecepatan tinggi (`aware_data0`) secara otomatis **tanpa dialog persetujuan OS**, **tanpa PIN**, dan **tanpa memutuskan koneksi Wi‑Fi/Hotspot**.
+- **Eliminasi Daftar Perangkat Bluetooth Umum & Koneksi BLE L2CAP Langsung (`Bt`, `Ble`, `MainActivity`)**:
+  - Menghapus `getBondedDevices()` dan pemindaian Bluetooth klasik umum (`ACTION_FOUND`) dari `Bt.java` sehingga perangkat audio/aksesori yang pernah *paired* (seperti speaker/TWS) **tidak pernah lagi muncul atau dihubungi**.
+  - Menambahkan dukungan **BLE L2CAP Connection-oriented Channel (`listenUsingInsecureL2capChannel` / `createInsecureL2capChannel`, API 29+)** beserta penyematan `psm` 16-bit di dalam beacon `Ble` (`0xFD91`), sehingga koneksi aliran suara & data bekerja langsung di atas alamat acak BLE (*Random Private Address*) tanpa *pairing* dan tanpa popup.
+  - Begitu sesama perangkat **Growth Internal** terdeteksi dalam radius jangkauan (`RSSI >= -82 dBm`), aplikasi otomatis masuk ke layar grup aktif (**Tim**) tanpa perlu memilih dari daftar perangkat.
+- **Bluetooth Mesh Network Multi-Hop (`Ble`, `0xFD92`)**:
+  - Menambahkan protokol *connectionless BLE flood mesh* (`Ble.MeshPacket`) dengan `TTL` (hingga 5 lompatan/hop) dan deduplikasi ID paket 16-bit (`recordSeenMesh`) untuk meneruskan sinyal **Prioritas (SOS)** + koordinat GPS, status baterai, pesan chat, dan **Instruksi** secara berantai antar perangkat.
+- **Multi-Hop Stream Relay Otomatis Lintas Transport (`Hub`, `Link`)**:
+  - Meningkatkan `Hub.java` agar setiap perangkat yang memiliki lebih dari satu sambungan aktif (`links.size() > 1`) otomatis bertindak sebagai *multi-hop relay* (`Frame.BRIDGE` otomatis + pencegahan *loop* berbasis pohon rentang `behind`), menjembatani suara (*Push-to-Talk* PCM <-> ADPCM), chat, foto, video, dan lokasi melintasi rantai **Wi‑Fi Aware <-> Hotspot/Wi‑Fi Direct <-> Bluetooth/BLE** tanpa konfigurasi manual.
+- **Mempertahankan Koneksi Wi‑Fi Direct (`MainActivity`, `Bridge`)**:
+  - Mempertahankan penuh fitur **Wi‑Fi Direct** dan jembatan *multihop* Wi‑Fi Direct berdampingan dengan Wi‑Fi Aware, Hotspot/LAN, dan Bluetooth Mesh.
+
 ## [0.14.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Seamless Auto-Connect dalam Radius Jangkauan)

@@ -29,7 +29,7 @@ dependencies {
     testImplementation 'org.robolectric:robolectric:4.14.1'
     testImplementation 'junit:junit:4.13.2'
     testRuntimeOnly 'org.robolectric:android-all:14-robolectric-10818077'
-    testCompileOnly files(androidJar)
+    testCompileOnly files(androidJar, new File(repoRoot, 'build/stubs'))
 }
 
 // Points Robolectric at the resources compiled by build.sh.

@@ -70,9 +70,9 @@ jobs:
           gh release edit "$TAG" --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp).
 
           ### Perubahan di v$VERSION
-          - **Seamless Auto-Connect dalam Radius Jangkauan (\`MainActivity\`, \`Lan\`, \`Ble\`, \`Bt\`)**: Perangkat Tim yang berada dalam radius jangkauan otomatis terhubung tanpa menekan tombol \`"Hubungkan"\` dan tanpa PIN melalui **Hotspot/Wi‑Fi Lokal**, **Bluetooth Insecure RFCOMM + BLE Beacon**, maupun *fallback* **Wi‑Fi Direct**.
-          - **Anti-*Split-Brain* & *Deterministic Tie-Breaker* (\`MainActivity.autoConnectDecision\`)**: Menyertakan \`memberCount\` pada paket \`Lan\` dan bendera \`inGroup\` pada beacon \`Ble\` sehingga perangkat tunggal maupun grup kecil otomatis melebur ke dalam satu grup utama Tim.
-          - **Filter Sinyal Minimum (\`RSSI >= -82 dBm\`) & *Cooldown* Anti-*Flapping***: Mencegah putus-nyambung berulang saat perangkat berada di batas luar jangkauan sinyal serta menghormati aksi keluar grup manual. Lihat rincian lengkap di [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md).
+          - **Prioritas 1: Wi‑Fi Aware / NAN Tanpa Popup (\`Aware\`, API 26+)**: Menemukan sesama perangkat **Growth Internal** dan membuka jalur data IPv6 (\`aware_data0\`) berkecepatan tinggi secara otomatis tanpa dialog persetujuan OS dan tanpa memutus Wi‑Fi/Hotspot.
+          - **Hanya Sesama Growth Internal + BLE L2CAP & Bluetooth Mesh Network (\`Ble\`, \`Bt\`, \`MainActivity\`)**: Menghapus daftar perangkat Bluetooth umum/historis (\`getBondedDevices\`) sehingga speaker/TWS tidak pernah ditampilkan atau dihubungi; menambahkan kanal **BLE L2CAP CoC** tanpa *pairing* serta **BLE Flood Mesh** (\`TTL = 5 hop\`) yang langsung memasukkan perangkat Tim ke layar komunikasi aktif.
+          - **Multi-Hop Relay Otomatis Lintas Transport (\`Hub\`, \`Link\`) & Wi‑Fi Direct Tetap Dipertahankan**: Setiap HP yang terhubung ke lebih dari satu rekan otomatis menjadi *relay* suara (*Push-to-Talk* PCM/ADPCM), chat, foto, dan sinyal **Prioritas (SOS)** melintasi Wi‑Fi Aware, Hotspot/LAN, Bluetooth Mesh, dan Wi‑Fi Direct. Lihat rincian lengkap di [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md).
 
           ### Cek keaslian file
           - Versi build (versionCode): $VC

@@ -160,4 +160,95 @@ public class AdpcmTest {
         tcpPeer.stop();
         owner.stop();
     }
+
+    @Test public void bleBeaconWithL2capPsmAndMeshPacketRoundTrip() {
+        Presence p = new Presence();
+        p.status = Presence.SAFE;
+        p.battery = 92;
+        p.hasLocation = true;
+        p.lat = -6.2000f;
+        p.lon = 106.8166f;
+
+        byte[] withPsm = Ble.pack("Andi_PIC", p, true, 0x0085);
+        assertTrue("BLE service data with L2CAP PSM must fit in 22 bytes", withPsm.length <= 22);
+        Ble.Beacon b = Ble.unpack(withPsm, -61);
+        assertNotNull(b);
+        assertEquals("Andi_PIC", b.name);
+        assertEquals(0x0085, b.psm);
+        assertTrue(b.inGroup);
+
+        // BLE Mesh packet with TTL=5 and deduplication
+        byte[] meshRaw = Ble.packMesh(0x1234, Ble.DEFAULT_TTL, Ble.MESH_TEXT,
+                "Pos 3", "Aman".getBytes(Hub.UTF8));
+        assertNotNull(meshRaw);
+        assertTrue(meshRaw.length <= 22);
+        Ble.MeshPacket pkt = Ble.unpackMesh(meshRaw);
+        assertNotNull(pkt);
+        assertEquals(0x1234, pkt.msgId);
+        assertEquals(5, pkt.ttl);
+        assertEquals(Ble.MESH_TEXT, pkt.type);
+        assertEquals("Pos 3", pkt.sender);
+        assertEquals("Aman", new String(pkt.body, Hub.UTF8));
+
+        Ble ble = new Ble(null);
+        assertTrue(ble.recordSeenMesh(0x1234));
+        assertFalse(ble.recordSeenMesh(0x1234)); // duplicate dropped
+    }
+
+    @Test public void automaticMultiHopRelayAcrossThreeHubs() throws Exception {
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        int port = 19129;
+        HubTest.Rec rA = new HubTest.Rec();
+        HubTest.Rec rB = new HubTest.Rec();
+        HubTest.Rec rC = new HubTest.Rec();
+
+        // Hub A: connected to Hub B via TCP (e.g. Wi-Fi Aware / Hotspot)
+        Hub hubA = new Hub("Pos 1 (Aware)", null, rA).port(port);
+        hubA.startServer(lo);
+        Thread.sleep(200);
+
+        // Hub B: middle node (client of Hub A over TCP, and peer to Hub C over BLE L2CAP stream)
+        Hub hubB = new Hub("Pos 2 (Relay)", null, rB).port(port);
+        hubB.startClient(lo);
+        HubTest.waitFor(rA, "join:Pos 2 (Relay)");
+        HubTest.waitFor(rB, "join:Pos 1 (Aware)");
+
+        // Hub C connects only to Hub B (2 hops away from Hub A)
+        final PipedOutputStream bOut = new PipedOutputStream();
+        final PipedInputStream cIn = new PipedInputStream(bOut, 65536);
+        final PipedOutputStream cOut = new PipedOutputStream();
+        final PipedInputStream bIn = new PipedInputStream(cOut, 65536);
+        Closeable rawClose = new Closeable() {
+            @Override public void close() throws IOException {
+                bOut.close();
+                cOut.close();
+                cIn.close();
+                bIn.close();
+            }
+        };
+
+        Hub hubC = new Hub("Pos 3 (Mesh)", null, rC).asOwner(false);
+        hubB.addStreamLink(bIn, bOut, rawClose, true);
+        hubC.addStreamLink(cIn, cOut, rawClose, true);
+
+        // Automatic multi-hop discovery: Pos 1 learns Pos 3, and Pos 3 learns Pos 1!
+        HubTest.waitFor(rA, "join:Pos 3 (Mesh)");
+        HubTest.waitFor(rC, "join:Pos 1 (Aware)");
+
+        // Multi-hop chat & voice from Pos 3 -> Pos 2 -> Pos 1
+        hubC.sendText("Rotasi dari Pos 3");
+        HubTest.waitFor(rA, "text:Pos 3 (Mesh):Rotasi dari Pos 3");
+        hubC.sendAudio(new byte[640]);
+        HubTest.waitFor(rA, "audio:Pos 3 (Mesh):640");
+
+        // Multi-hop chat & voice from Pos 1 -> Pos 2 -> Pos 3
+        hubA.sendText("Diterima di Pos 1");
+        HubTest.waitFor(rC, "text:Pos 1 (Aware):Diterima di Pos 1");
+        hubA.sendAudio(new byte[640]);
+        HubTest.waitFor(rC, "audio:Pos 1 (Aware):640");
+
+        hubC.stop();
+        hubB.stop();
+        hubA.stop();
+    }
 }

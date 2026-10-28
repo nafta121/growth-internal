@@ -7,7 +7,7 @@ SDK_JAR=${SDK_JAR:-/usr/lib/android-sdk/platforms/android-23/android.jar}
 DX_JAR=${DX_JAR:-/usr/lib/android-sdk/build-tools/debian/lib/dx.jar}
 SRC=app/src/main
 OUT=build
-rm -rf "$OUT" && mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex"
+rm -rf "$OUT" && mkdir -p "$OUT/gen" "$OUT/stubs" "$OUT/classes" "$OUT/dex"
 
 # Release builds pass VERSION_CODE so every published APK installs as an update over the last one.
 VERSION_ARGS=()
@@ -15,6 +15,8 @@ if [ -n "${VERSION_CODE:-}" ]; then VERSION_ARGS=(--version-code "$VERSION_CODE"
 aapt package -f -m -J "$OUT/gen" -M "$SRC/AndroidManifest.xml" -S "$SRC/res" -I "$SDK_JAR" \
   "${VERSION_ARGS[@]}" -F "$OUT/unsigned.apk"
 javac -source 8 -target 8 -Xlint:-options -encoding UTF-8 -bootclasspath "$SDK_JAR" \
+  -d "$OUT/stubs" $(find tools/aware-stubs -name '*.java')
+javac -source 8 -target 8 -Xlint:-options -encoding UTF-8 -bootclasspath "$SDK_JAR" -classpath "$OUT/stubs" \
   -d "$OUT/classes" $(find "$SRC/java" "$OUT/gen" -name '*.java')
 java -jar "$DX_JAR" --dex --min-sdk-version=23 --output="$OUT/dex/classes.dex" "$OUT/classes"
 (cd "$OUT/dex" && aapt add ../unsigned.apk classes.dex >/dev/null)

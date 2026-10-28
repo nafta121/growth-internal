@@ -68,6 +68,10 @@ final class Hub implements Link.Listener {
 
     boolean hasPeers() { return !links.isEmpty(); }
 
+    boolean hasMember(String name) {
+        synchronized (members) { return members.containsKey(name); }
+    }
+
     boolean isOwner() { return owner; }
 
     Hub asOwner(boolean isOwner) {
@@ -146,6 +150,24 @@ final class Hub implements Link.Listener {
         }, "hub-client").start();
     }
 
+    void connectPeer(final InetAddress host, final int peerPort, final Runnable onFail) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                for (int attempt = 0; attempt < 4 && !stopped; attempt++) {
+                    try {
+                        Socket s = new Socket();
+                        s.connect(new InetSocketAddress(host, peerPort), 3500);
+                        addLink(s);
+                        return;
+                    } catch (IOException e) {
+                        try { Thread.sleep(800); } catch (InterruptedException ie) { return; }
+                    }
+                }
+                if (!stopped && onFail != null) onFail.run();
+            }
+        }, "hub-peer").start();
+    }
+
     /**
      * Makes this owner a bridge: connects to another group's owner and merges the two
      * groups. The socket factory routes over the Wi-Fi network joined to that group.
@@ -161,6 +183,7 @@ final class Hub implements Link.Listener {
                         if (stopped) { s.close(); return; }
                         Link link = new Link(s, Hub.this);
                         link.relay = true;
+                        link.sentBridge = true;
                         // Queued before the reader starts, so the far owner knows we are a
                         // bridge before any phone behind us is introduced.
                         link.send(new Frame(Frame.HELLO, myName, myPhoto));
@@ -242,11 +265,12 @@ final class Hub implements Link.Listener {
 
     @Override public void onFrame(Link from, Frame f) {
         if (f.type == Frame.HELLO) {
-            // The first HELLO on a link names the phone at the other end; a client
+            boolean multiHop = owner || links.size() > 1;
+            // The first HELLO on a link names the phone at the other end; a client or relay
             // later receives relayed HELLOs of the other members over the same link.
             synchronized (members) {
                 if (from.peerName == null) {
-                    if (owner && nameTaken(f.sender)) {
+                    if (multiHop && nameTaken(f.sender)) {
                         if (from == uplink) {
                             cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
                             from.close();
@@ -260,8 +284,16 @@ final class Hub implements Link.Listener {
                     from.peerName = f.sender;
                     from.peerPhoto = f.payload;
                     from.behind.add(f.sender);
-                    if (owner) {
-                        // Everyone we know of, including phones behind bridges.
+                    if (links.size() > 1 || !members.isEmpty()) {
+                        for (Link l : links) {
+                            if (!l.sentBridge) {
+                                l.sentBridge = true;
+                                l.send(new Frame(Frame.BRIDGE, myName, null));
+                            }
+                        }
+                    }
+                    if (multiHop) {
+                        // Everyone we know of, including phones behind bridges/relays.
                         for (Map.Entry<String, byte[]> e : members.entrySet()) {
                             if (!e.getKey().equals(f.sender)) from.send(new Frame(Frame.HELLO, e.getKey(), e.getValue()));
                         }
@@ -271,21 +303,21 @@ final class Hub implements Link.Listener {
                             }
                         }
                         byte[] info = joinInfo;
-                        if (info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
+                        if (owner && info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
                     }
-                } else if (owner) {
-                    // Only a bridge may introduce further phones, and never a name already in use.
-                    if (!from.relay || nameTaken(f.sender)) return;
+                } else {
+                    // Only a bridge/relay may introduce further phones, and never a name already in use.
+                    if ((owner && !from.relay) || nameTaken(f.sender)) return;
                     from.behind.add(f.sender);
                 }
                 members.put(f.sender, f.payload);
             }
-            if (owner) broadcast(f, from);
+            if (multiHop) broadcast(f, from);
             cb.onMemberJoined(f.sender, f.payload);
             return;
         }
         if (f.type == Frame.BRIDGE) {
-            if (owner && f.sender.equals(from.peerName)) from.relay = true;
+            if (f.sender.equals(from.peerName)) from.relay = true;
             return;
         }
         if (f.type == Frame.JOIN_INFO) {
@@ -297,16 +329,15 @@ final class Hub implements Link.Listener {
             cb.onRejected(new String(f.payload, UTF8));
             return;
         }
+        // A sender belongs to the link it joined through: a plain member only speaks for
+        // itself, a bridge/relay for the phones behind it. This stops one member from posing
+        // as another (fake SOS or announcements) and prevents mesh loops.
+        if (!from.behind.contains(f.sender)) return;
         if (f.type == Frame.AUDIO_ADPCM) {
-            if (owner && !from.behind.contains(f.sender)) return;
             f = new Frame(Frame.AUDIO, f.sender, Adpcm.decode(f.payload));
         }
-        if (owner) {
-            // A sender belongs to the link it joined through: a plain member only speaks for
-            // itself, a bridge for the phones behind it. This stops one member from posing
-            // as another (fake SOS or announcements).
-            if (!from.behind.contains(f.sender)) return;
-            if (f.type == Frame.LEAVE) from.behind.remove(f.sender);
+        if (f.type == Frame.LEAVE) from.behind.remove(f.sender);
+        if (owner || links.size() > 1) {
             broadcast(f, from);
         }
         switch (f.type) {
@@ -355,17 +386,11 @@ final class Hub implements Link.Listener {
             if (!owner && links.isEmpty()) cb.onRejected("Koneksi ke pemilik grup terputus");
             return;
         }
-        if (owner) {
-            // Everyone reached through this link is gone for the rest of us.
-            for (String name : new ArrayList<String>(link.behind)) {
+        for (String name : new ArrayList<String>(link.behind)) {
+            if (owner || !links.isEmpty()) {
                 broadcast(new Frame(Frame.LEAVE, name, null), null);
-                removeMember(name);
             }
-        } else {
-            // Lost the group owner, and with it everyone it relayed for us.
-            List<String> all;
-            synchronized (members) { all = new ArrayList<String>(members.keySet()); }
-            for (String n : all) removeMember(n);
+            removeMember(name);
         }
     }
 

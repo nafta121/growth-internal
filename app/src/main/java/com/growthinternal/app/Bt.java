@@ -4,47 +4,35 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.Build;
 
 import java.io.IOException;
-import java.util.Set;
 import java.util.UUID;
 
 /**
- * Bluetooth Classic (RFCOMM) fallback transport. Carries the exact same Frame
- * protocol as Wi-Fi Direct/LAN over an insecure RFCOMM socket, with 4:1 IMA ADPCM
- * audio compression enabled on the Link so push-to-talk voice stays smooth.
+ * Zero-popup Bluetooth transport exclusively for verified Growth Internal peers
+ * discovered via BLE beacons. Prefers BLE L2CAP Connection-oriented Channels
+ * (API 29+, works directly on BLE random addresses without pairing or popups)
+ * and falls back to Insecure RFCOMM. Audio is compressed 4:1 via IMA ADPCM.
  */
 final class Bt {
     static final UUID SERVICE_UUID = UUID.fromString("8f6ef5b0-9491-4d3a-b6e0-9f5c1a2e3d01");
     private static final String SERVICE_NAME = "GrowthInternal";
 
     interface Listener {
-        void onDevice(BluetoothDevice device, String name);
         void onIncoming(BluetoothSocket socket);
+        void onL2capReady(int psm);
     }
 
-    private final Context ctx;
     private final Listener listener;
     private final BluetoothAdapter adapter;
-    private volatile BluetoothServerSocket serverSocket;
+    private volatile BluetoothServerSocket rfcommServer;
+    private volatile BluetoothServerSocket l2capServer;
+    private volatile int l2capPsm;
     private volatile boolean serverRunning;
-    private boolean receiverRegistered;
-
-    private final BroadcastReceiver receiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context context, Intent intent) {
-            if (intent == null || !BluetoothDevice.ACTION_FOUND.equals(intent.getAction())) return;
-            BluetoothDevice dev = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-            reportDevice(dev);
-        }
-    };
 
     Bt(Context ctx, Listener listener) {
-        this.ctx = ctx;
         this.listener = listener;
         BluetoothAdapter a = null;
         try {
@@ -62,60 +50,69 @@ final class Bt {
         }
     }
 
-    void discover() {
-        if (!isAvailable()) return;
-        registerReceiverIfNeeded();
-        try {
-            Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-            if (bonded != null) {
-                for (BluetoothDevice dev : bonded) {
-                    reportDevice(dev);
-                }
-            }
-        } catch (SecurityException ignored) {
-        }
-        new Thread(new Runnable() {
-            @Override public void run() {
-                try {
-                    if (adapter.isDiscovering()) adapter.cancelDiscovery();
-                    adapter.startDiscovery();
-                } catch (SecurityException ignored) {
-                } catch (RuntimeException ignored) {
-                }
-            }
-        }, "bt-discover").start();
+    int l2capPsm() {
+        return l2capPsm;
     }
 
     void startServer() {
         if (serverRunning || !isAvailable()) return;
         serverRunning = true;
-        Thread t = new Thread(new Runnable() {
+        if (Build.VERSION.SDK_INT >= 29) {
+            Thread l2 = new Thread(new Runnable() {
+                @Override public void run() {
+                    try {
+                        BluetoothServerSocket ss = (BluetoothServerSocket) BluetoothAdapter.class
+                                .getMethod("listenUsingInsecureL2capChannel")
+                                .invoke(adapter);
+                        l2capServer = ss;
+                        int psm = (Integer) BluetoothServerSocket.class
+                                .getMethod("getPsm")
+                                .invoke(ss);
+                        l2capPsm = psm;
+                        if (listener != null) listener.onL2capReady(psm);
+                        acceptLoop(ss);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }, "bt-l2cap-server");
+            l2.setDaemon(true);
+            l2.start();
+        }
+        Thread rf = new Thread(new Runnable() {
             @Override public void run() {
                 try {
                     BluetoothServerSocket ss = adapter.listenUsingInsecureRfcommWithServiceRecord(
                             SERVICE_NAME, SERVICE_UUID);
-                    serverSocket = ss;
-                    while (serverRunning && ss != null) {
-                        BluetoothSocket sock = ss.accept();
-                        if (sock == null) continue;
-                        if (!serverRunning || listener == null) {
-                            try { sock.close(); } catch (IOException ignored) {}
-                            break;
-                        }
-                        listener.onIncoming(sock);
-                    }
+                    rfcommServer = ss;
+                    acceptLoop(ss);
                 } catch (IOException ignored) {
                 } catch (SecurityException ignored) {
                 } finally {
                     serverRunning = false;
                 }
             }
-        }, "bt-server");
-        t.setDaemon(true);
-        t.start();
+        }, "bt-rfcomm-server");
+        rf.setDaemon(true);
+        rf.start();
     }
 
-    void connect(final BluetoothDevice device, final Hub hub,
+    private void acceptLoop(BluetoothServerSocket ss) {
+        try {
+            while (serverRunning && ss != null) {
+                BluetoothSocket sock = ss.accept();
+                if (sock == null) continue;
+                if (!serverRunning || listener == null) {
+                    try { sock.close(); } catch (IOException ignored) {}
+                    break;
+                }
+                listener.onIncoming(sock);
+            }
+        } catch (IOException ignored) {
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    void connect(final BluetoothDevice device, final int psm, final Hub hub,
             final Runnable onConnected, final Runnable onFail) {
         if (device == null || hub == null) {
             if (onFail != null) onFail.run();
@@ -128,8 +125,23 @@ final class Bt {
                     if (adapter != null) {
                         try { adapter.cancelDiscovery(); } catch (SecurityException ignored) {}
                     }
-                    sock = device.createInsecureRfcommSocketToServiceRecord(SERVICE_UUID);
-                    sock.connect();
+                    if (psm > 0 && Build.VERSION.SDK_INT >= 29) {
+                        try {
+                            sock = (BluetoothSocket) BluetoothDevice.class
+                                    .getMethod("createInsecureL2capChannel", int.class)
+                                    .invoke(device, psm);
+                            sock.connect();
+                        } catch (Exception e) {
+                            if (sock != null) {
+                                try { sock.close(); } catch (IOException ignored) {}
+                                sock = null;
+                            }
+                        }
+                    }
+                    if (sock == null) {
+                        sock = device.createInsecureRfcommSocketToServiceRecord(SERVICE_UUID);
+                        sock.connect();
+                    }
                     hub.addStreamLink(sock.getInputStream(), sock.getOutputStream(), sock, true);
                     if (onConnected != null) onConnected.run();
                 } catch (IOException | RuntimeException e) {
@@ -144,51 +156,20 @@ final class Bt {
 
     void stopServer() {
         serverRunning = false;
-        BluetoothServerSocket ss = serverSocket;
-        serverSocket = null;
-        if (ss != null) {
-            try { ss.close(); } catch (IOException ignored) {}
+        l2capPsm = 0;
+        BluetoothServerSocket l2 = l2capServer;
+        l2capServer = null;
+        if (l2 != null) {
+            try { l2.close(); } catch (IOException ignored) {}
+        }
+        BluetoothServerSocket rf = rfcommServer;
+        rfcommServer = null;
+        if (rf != null) {
+            try { rf.close(); } catch (IOException ignored) {}
         }
     }
 
     void stop() {
         stopServer();
-        if (receiverRegistered) {
-            receiverRegistered = false;
-            try { ctx.unregisterReceiver(receiver); } catch (IllegalArgumentException ignored) {}
-        }
-        if (adapter != null) {
-            try {
-                if (adapter.isDiscovering()) adapter.cancelDiscovery();
-            } catch (SecurityException ignored) {
-            }
-        }
-    }
-
-    private void registerReceiverIfNeeded() {
-        if (receiverRegistered) return;
-        IntentFilter f = new IntentFilter(BluetoothDevice.ACTION_FOUND);
-        if (Build.VERSION.SDK_INT >= 33) {
-            try {
-                Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
-                        .invoke(ctx, receiver, f, 2 /* RECEIVER_EXPORTED */);
-            } catch (Exception e) {
-                ctx.registerReceiver(receiver, f);
-            }
-        } else {
-            ctx.registerReceiver(receiver, f);
-        }
-        receiverRegistered = true;
-    }
-
-    private void reportDevice(BluetoothDevice dev) {
-        if (dev == null || listener == null) return;
-        try {
-            String name = dev.getName();
-            if (name != null && !name.trim().isEmpty()) {
-                listener.onDevice(dev, name.trim());
-            }
-        } catch (SecurityException ignored) {
-        }
     }
 }
