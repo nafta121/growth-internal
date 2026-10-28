@@ -2349,6 +2349,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 members.remove(name);
                 talkers.remove(name);
                 presences.remove(name);
+                voice.drop(name);
                 refreshCompass();
                 refreshMembers();
                 refreshTalkers();

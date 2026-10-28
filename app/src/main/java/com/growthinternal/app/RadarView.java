@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.location.Location;
 import android.view.View;
@@ -34,9 +35,10 @@ final class RadarView extends View {
     }
 
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF dst = new RectF();
     private final float density;
     private List<Target> targets = new ArrayList<Target>();
     private Location me;
@@ -145,8 +147,8 @@ final class RadarView extends View {
             float y = cy - (float) Math.cos(a) * rr;
             fill.setColor(t.color);
             c.drawCircle(x, y, av / 2 + dp(3), fill);
-            c.drawBitmap(Bitmap.createScaledBitmap(t.avatar, (int) av, (int) av, true),
-                    x - av / 2, y - av / 2, null);
+            dst.set(x - av / 2, y - av / 2, x + av / 2, y + av / 2);
+            c.drawBitmap(t.avatar, null, dst, fill);
             label.setColor(text);
             c.drawText(t.name + " · " + formatDistance(d), x, y + av / 2 + dp(16), label);
         }

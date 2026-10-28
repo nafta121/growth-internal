@@ -222,43 +222,44 @@ final class Hub implements Link.Listener {
         if (f.type == Frame.HELLO) {
             // The first HELLO on a link names the phone at the other end; a client
             // later receives relayed HELLOs of the other members over the same link.
-            if (from.peerName == null) {
-                if (owner && nameTaken(f.sender)) {
-                    if (from == uplink) {
-                        cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
-                        from.close();
-                    } else {
-                        from.send(new Frame(Frame.REJECT, myName,
-                                ("Nama \"" + f.sender + "\" sudah dipakai di grup ini. Ganti nama lalu sambung lagi.")
-                                        .getBytes(UTF8)));
+            synchronized (members) {
+                if (from.peerName == null) {
+                    if (owner && nameTaken(f.sender)) {
+                        if (from == uplink) {
+                            cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
+                            from.close();
+                        } else {
+                            from.send(new Frame(Frame.REJECT, myName,
+                                    ("Nama \"" + f.sender + "\" sudah dipakai di grup ini. Ganti nama lalu sambung lagi.")
+                                            .getBytes(UTF8)));
+                        }
+                        return;
                     }
-                    return;
-                }
-                from.peerName = f.sender;
-                from.peerPhoto = f.payload;
-                from.behind.add(f.sender);
-                if (owner) {
-                    // Everyone we know of, including phones behind bridges.
-                    synchronized (members) {
+                    from.peerName = f.sender;
+                    from.peerPhoto = f.payload;
+                    from.behind.add(f.sender);
+                    if (owner) {
+                        // Everyone we know of, including phones behind bridges.
                         for (Map.Entry<String, byte[]> e : members.entrySet()) {
                             if (!e.getKey().equals(f.sender)) from.send(new Frame(Frame.HELLO, e.getKey(), e.getValue()));
                         }
-                    }
-                    synchronized (presences) {
-                        for (Map.Entry<String, byte[]> e : presences.entrySet()) {
-                            from.send(new Frame(Frame.PRESENCE, e.getKey(), e.getValue()));
+                        synchronized (presences) {
+                            for (Map.Entry<String, byte[]> e : presences.entrySet()) {
+                                from.send(new Frame(Frame.PRESENCE, e.getKey(), e.getValue()));
+                            }
                         }
+                        byte[] info = joinInfo;
+                        if (info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
                     }
-                    byte[] info = joinInfo;
-                    if (info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
+                } else if (owner) {
+                    // Only a bridge may introduce further phones, and never a name already in use.
+                    if (!from.relay || nameTaken(f.sender)) return;
+                    from.behind.add(f.sender);
                 }
-            } else if (owner) {
-                // Only a bridge may introduce further phones, and never a name already in use.
-                if (!from.relay || nameTaken(f.sender)) return;
-                from.behind.add(f.sender);
+                members.put(f.sender, f.payload);
             }
             if (owner) broadcast(f, from);
-            addMember(f.sender, f.payload);
+            cb.onMemberJoined(f.sender, f.payload);
             return;
         }
         if (f.type == Frame.BRIDGE) {
@@ -324,7 +325,10 @@ final class Hub implements Link.Listener {
         if (wasUplink) uplink = null;
         if (stopped) return;
         if (wasUplink) cb.onUplink(false);
-        if (link.peerName == null) return;
+        if (link.peerName == null) {
+            if (!owner && links.isEmpty()) cb.onRejected("Koneksi ke pemilik grup terputus");
+            return;
+        }
         if (owner) {
             // Everyone reached through this link is gone for the rest of us.
             for (String name : new ArrayList<String>(link.behind)) {
@@ -342,11 +346,6 @@ final class Hub implements Link.Listener {
     private boolean nameTaken(String name) {
         if (name.equals(myName)) return true;
         synchronized (members) { return members.containsKey(name); }
-    }
-
-    private void addMember(String name, byte[] photo) {
-        synchronized (members) { members.put(name, photo); }
-        cb.onMemberJoined(name, photo);
     }
 
     private void removeMember(String name) {

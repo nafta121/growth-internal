@@ -72,13 +72,22 @@ final class Voice {
     void play(String from, byte[] pcm) {
         AudioTrack t = tracks.get(from);
         if (t == null) {
-            int min = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
-            t = new AudioTrack(AudioManager.STREAM_VOICE_CALL, RATE, AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT, Math.max(min, FRAME_BYTES * 10),
-                    AudioTrack.MODE_STREAM);
-            t.play();
-            tracks.put(from, t);
+            synchronized (this) {
+                t = tracks.get(from);
+                if (t == null) {
+                    int min = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT);
+                    t = new AudioTrack(AudioManager.STREAM_VOICE_CALL, RATE, AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT, Math.max(min, FRAME_BYTES * 10),
+                            AudioTrack.MODE_STREAM);
+                    if (t.getState() != AudioTrack.STATE_INITIALIZED) {
+                        t.release();
+                        return;
+                    }
+                    t.play();
+                    tracks.put(from, t);
+                }
+            }
         }
         try {
             t.write(pcm, 0, pcm.length);
@@ -87,7 +96,15 @@ final class Voice {
         }
     }
 
-    void release() {
+    synchronized void drop(String from) {
+        AudioTrack t = tracks.remove(from);
+        if (t != null) {
+            try { t.stop(); } catch (IllegalStateException ignored) { }
+            t.release();
+        }
+    }
+
+    synchronized void release() {
         stopCapture();
         for (AudioTrack t : tracks.values()) {
             try { t.stop(); } catch (IllegalStateException ignored) { }

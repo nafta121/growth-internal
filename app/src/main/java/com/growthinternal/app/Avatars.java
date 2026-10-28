@@ -12,10 +12,11 @@ import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.util.LruCache;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.Arrays;
 
 /** Round profile pictures: the member's photo, or their initial on a colour. */
 final class Avatars {
@@ -24,10 +25,14 @@ final class Avatars {
             Color.rgb(147, 51, 234), Color.rgb(234, 88, 12), Color.rgb(31, 122, 69),
     };
     static final int PHOTO_PX = 160;
+    private static final LruCache<String, Bitmap> CACHE = new LruCache<String, Bitmap>(64);
 
     private Avatars() { }
 
     static Bitmap circle(String name, byte[] photo, int size) {
+        String key = (name == null ? "?" : name) + ":" + size + ":" + (photo == null ? 0 : Arrays.hashCode(photo));
+        Bitmap cached = CACHE.get(key);
+        if (cached != null) return cached;
         Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -40,6 +45,7 @@ final class Avatars {
             sh.setLocalMatrix(m);
             p.setShader(sh);
             c.drawCircle(size / 2f, size / 2f, size / 2f, p);
+            CACHE.put(key, out);
             return out;
         }
         String n = name == null ? "?" : name.trim();
@@ -52,6 +58,7 @@ final class Avatars {
         Rect b = new Rect();
         p.getTextBounds(initial, 0, initial.length(), b);
         c.drawText(initial, size / 2f - b.exactCenterX(), size / 2f - b.exactCenterY(), p);
+        CACHE.put(key, out);
         return out;
     }
 
@@ -67,17 +74,7 @@ final class Avatars {
 
     /** Loads an image the user picked, crops it square and shrinks it to a few KB. */
     static byte[] fromUri(ContentResolver cr, Uri uri) throws IOException {
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inJustDecodeBounds = true;
-        InputStream in = cr.openInputStream(uri);
-        try { BitmapFactory.decodeStream(in, null, o); } finally { in.close(); }
-        int sample = 1;
-        while (Math.min(o.outWidth, o.outHeight) / (sample * 2) >= PHOTO_PX) sample *= 2;
-        o = new BitmapFactory.Options();
-        o.inSampleSize = sample;
-        in = cr.openInputStream(uri);
-        Bitmap full;
-        try { full = BitmapFactory.decodeStream(in, null, o); } finally { in.close(); }
+        Bitmap full = Photos.decode(Photos.prepare(cr, uri), PHOTO_PX * 2);
         if (full == null) throw new IOException("Gambar tidak bisa dibaca");
         int side = Math.min(full.getWidth(), full.getHeight());
         Bitmap sq = Bitmap.createBitmap(full, (full.getWidth() - side) / 2,

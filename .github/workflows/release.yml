@@ -67,7 +67,13 @@ jobs:
           VC=$(aapt dump badging build/growth-internal.apk | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
           CERT=$(apksigner verify --print-certs build/growth-internal.apk | grep -m1 'SHA-256 digest' | sed 's/.*: //')
           gh release upload "$TAG" build/growth-internal.apk build/growth-internal.apk.sha256 --clobber
-          gh release edit "$TAG" --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp). Versi MVP: belum diuji lapangan di banyak HP.
+          gh release edit "$TAG" --notes "APK Growth Internal $VERSION untuk Android 6.0 ke atas. Unduh **growth-internal.apk** di bawah, lalu ikuti [cara instal](https://github.com/${GITHUB_REPOSITORY}#cara-instal-di-hp).
+
+          ### Perubahan di v$VERSION
+          - **Keamanan Thread & Handshake Grup (\`Hub\`)**: Menutup celah *race condition* pemeriksaan nama duplikat saat \`HELLO\` serta melaporkan penolakan secara eksplisit bila soket diputus sebelum *handshake* selesai (mis. saat grup penuh).
+          - **Manajemen Memori Audio (\`Voice\`, \`MainActivity\`)**: Sinkronisasi inisialisasi \`AudioTrack\`, pemeriksaan \`STATE_INITIALIZED\`, dan pelepasan otomatis track audio saat anggota keluar dari grup (\`voice.drop\`).
+          - **Performa UI & Peta (\`RadarView\`, \`Avatars\`, \`MapView\`)**: Menghapus alokasi bitmap per-*frame* di kompas radar, menambahkan \`LruCache\` serta koreksi orientasi EXIF pada avatar profil, dan meningkatkan cache ubin peta offline menjadi 120 ubin.
+          - **Pembersihan Repositori**: Menghapus skrip usang \`tools/render-social.sh\` & \`tools/social-card.html\` serta menambahkan [\`CHANGELOG.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md).
 
           ### Cek keaslian file
           - Versi build (versionCode): $VC

@@ -97,6 +97,16 @@ public class HubTest {
         dup.startClient(lo);
         waitFor(rc, "rejected");
 
+        // Closing before HELLO is reported as rejected instead of hanging silently.
+        java.net.ServerSocket drop = new java.net.ServerSocket(9109, 1, lo);
+        Rec rdrop = new Rec();
+        Hub dropped = new Hub("Tamu", null, rdrop).port(9109);
+        dropped.startClient(lo);
+        drop.accept().close();
+        drop.close();
+        waitFor(rdrop, "rejected");
+        dropped.stop();
+
         // Leaving is noticed by the others.
         a.stop();
         waitFor(rb, "left:Budi");

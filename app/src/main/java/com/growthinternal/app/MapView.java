@@ -34,7 +34,7 @@ final class MapView extends View {
     private final float tileBase;
     private final int textColor, subColor, accent;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(48);
+    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(120);
     private final Set<String> missing = new HashSet<String>();
     private final ScaleGestureDetector scaler;
     private final GestureDetector gestures;
