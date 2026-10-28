@@ -227,6 +227,7 @@ public class ScreenshotTest {
         p.onPresence("Sari (Pos 3)", presence(Presence.SOS, 21, -6.19850, 106.81480));
         p.onPresence("Raka (Basecamp)", presence(Presence.SAFE, 91, -6.20310, 106.81950));
         call(p, "showMap", new Class<?>[0]);
+        Thread.sleep(100);
         ShadowLooper.idleMainLooper();
         MapView mv = (MapView) get(p, "mapView");
         set(mv, "zoom", 16.2);

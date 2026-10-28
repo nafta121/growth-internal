@@ -34,6 +34,8 @@ final class MapView extends View {
     private final float tileBase;
     private final int textColor, subColor, accent;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Rect src = new Rect();
+    private final RectF dst = new RectF();
     private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(120);
     private final Set<String> missing = new HashSet<String>();
     private final ScaleGestureDetector scaler;
@@ -147,7 +149,6 @@ final class MapView extends View {
         int y0 = (int) Math.floor(cy - h / 2f / tp), y1 = (int) Math.floor(cy + h / 2f / tp);
         int max = 1 << tz;
         drewTile = false;
-        RectF dst = new RectF();
         for (int x = x0; x <= x1; x++) {
             for (int y = Math.max(0, y0); y <= Math.min(max - 1, y1); y++) {
                 float left = (float) (w / 2f + (x - cx) * tp), top = (float) (h / 2f + (y - cy) * tp);
@@ -168,7 +169,8 @@ final class MapView extends View {
             if (b == null) continue;
             int part = Tiles.SIZE >> k;
             int sx = (x & ((1 << k) - 1)) * part, sy = (y & ((1 << k) - 1)) * part;
-            c.drawBitmap(b, new Rect(sx, sy, sx + part, sy + part), dst, paint);
+            src.set(sx, sy, sx + part, sy + part);
+            c.drawBitmap(b, src, dst, paint);
             drewTile = true;
             return;
         }
@@ -212,7 +214,8 @@ final class MapView extends View {
         paint.setColor(t.color);
         c.drawCircle(px, py, r + 3 * density, paint);
         if (t.avatar != null) {
-            c.drawBitmap(t.avatar, null, new RectF(px - r, py - r, px + r, py + r), paint);
+            dst.set(px - r, py - r, px + r, py + r);
+            c.drawBitmap(t.avatar, null, dst, paint);
         }
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
@@ -220,8 +223,9 @@ final class MapView extends View {
         float tw = paint.measureText(t.name);
         float ty = py + r + 18 * density;
         paint.setColor(0xE6FFFFFF);
-        c.drawRoundRect(new RectF(px - tw / 2 - 6 * density, ty - 13 * density,
-                px + tw / 2 + 6 * density, ty + 5 * density), 8 * density, 8 * density, paint);
+        dst.set(px - tw / 2 - 6 * density, ty - 13 * density,
+                px + tw / 2 + 6 * density, ty + 5 * density);
+        c.drawRoundRect(dst, 8 * density, 8 * density, paint);
         paint.setColor(textColor);
         c.drawText(t.name, px, ty, paint);
     }

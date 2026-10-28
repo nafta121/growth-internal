@@ -2,6 +2,25 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.12.0] - 2026-10-28
+
+### Diperbaiki & Dioptimalkan (Android Skills Audit)
+- **Eliminasi Risiko ANR pada Main Thread (`MainActivity`)**:
+  - Memindahkan pemrosesan foto profil (`Avatars.fromUri`) pada `onActivityResult` (`REQ_PHOTO`) ke thread latar `"avatar-prepare"`.
+  - Memindahkan decode gambar chat (`Photos.decode(jpeg, 720)`) dan tampilan layar penuh (`Photos.decode(jpeg, 2048)`) ke thread latar sebelum memperbarui UI.
+  - Memindahkan ekstraksi thumbnail video (`ThumbnailUtils.createVideoThumbnail`) pada pengiriman dan penerimaan video ke thread latar.
+  - Memindahkan penghapusan berkas video sementara (`clearClips`) saat `onCreate` dan penghitungan jumlah ubin peta (`Tiles.count`) saat `refreshMapStatus` ke thread latar.
+- **Optimasi Alokasi Memori Render Peta (`MapView`)**:
+  - Mengganti alokasi objek `new Rect(...)` dan `new RectF(...)` berulang di dalam `onDraw()`, `drawTile()`, dan `drawTarget()` dengan field `src` dan `dst` yang dialokasikan satu kali.
+- **Keamanan Intent, Izin Runtime, & Kepatuhan Kebijakan (`MainActivity`, `KeepAliveService`)**:
+  - Mendaftarkan `BroadcastReceiver` Wi-Fi Direct dengan flag `RECEIVER_NOT_EXPORTED` (`0x4`) pada Android 13+ (API 33+) serta menambahkan validasi `intent != null` di `onP2pEvent`.
+  - Menunda permintaan izin lokasi & mikrofon hingga pengguna berinteraksi dengan fitur terkait (Cari, Bicara, Kompas, Peta) alih-alih memintanya secara paksa di atas splash screen saat *cold start*.
+  - Menambahkan deteksi penolakan izin permanen (`!shouldShowRequestPermissionRationale`) beserta dialog pintasan menuju Pengaturan Aplikasi (`ACTION_APPLICATION_DETAILS_SETTINGS`).
+- **Kesiapan Edge-to-Edge (`MainActivity`)**:
+  - Menambahkan `OnApplyWindowInsetsListener` pada kontainer utama agar *padding* layar menyesuaikan *system window insets* (status bar, navigation bar, dan keyboard/IME).
+- **Pengujian Unit Baru (`PhotosTest`)**:
+  - Menambahkan pengujian otomatis untuk cache `Avatars.circle()` dan validasi keamanan `Photos.decode()`.
+
 ## [0.11.0] - 2026-10-28
 
 ### Diperbaiki & Dioptimalkan (Ponytail Audit)

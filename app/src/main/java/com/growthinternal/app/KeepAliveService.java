@@ -39,6 +39,7 @@ public class KeepAliveService extends Service {
                 .setOngoing(true)
                 .setPriority(Notification.PRIORITY_LOW)
                 .build();
+        // shortcut: manifest foregroundServiceType omitted because build.sh compiles against android-23; add when compileSdk >= 29 and targetSdk >= 34
         startForeground(Alerts.ID_ONGOING, n);
         if (wake == null) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);

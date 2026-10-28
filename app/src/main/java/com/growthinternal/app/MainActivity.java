@@ -184,7 +184,11 @@ public class MainActivity extends Activity implements Hub.Callback {
         w.setNavigationBarColor(BG);
         w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         prefs = getSharedPreferences("growthinternal", MODE_PRIVATE);
-        if (state == null) clearClips();
+        if (state == null) {
+            new Thread(new Runnable() {
+                @Override public void run() { clearClips(); }
+            }, "clear-clips").start();
+        }
         myName = prefs.getString("name", Build.MODEL);
         String p = prefs.getString("photo", null);
         myPhoto = p == null ? null : Base64.decode(p, Base64.DEFAULT);
@@ -196,6 +200,13 @@ public class MainActivity extends Activity implements Hub.Callback {
         w.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         FrameLayout frame = new FrameLayout(this);
+        frame.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+                return insets.consumeSystemWindowInsets();
+            }
+        });
         frame.addView(buildUi());
         compassPage = buildCompass();
         frame.addView(compassPage);
@@ -223,11 +234,20 @@ public class MainActivity extends Activity implements Hub.Callback {
         f.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
         f.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
         f.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
-        registerReceiver(receiver, f);
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
+                        .invoke(this, receiver, f, 4 /* RECEIVER_NOT_EXPORTED */);
+            } catch (Exception e) {
+                registerReceiver(receiver, f);
+            }
+        } else {
+            registerReceiver(receiver, f);
+        }
 
         addSystemMessage("Komunikasi lapangan tanpa internet & sinyal. Nyalakan Wi‑Fi dan Lokasi di setiap HP Tim, "
                 + "lalu ketuk ikon cari.");
-        if (ensurePermissions()) startLocation();
+        if (neededPermissions().length == 0) startLocation();
         // First launch: the default name is the phone model, which nobody in the group recognizes.
         if (state == null && !prefs.contains("name")) {
             ui.postDelayed(new Runnable() {
@@ -261,6 +281,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         KeepAliveService.update(this, t);
     }
 
+    // shortcut: uses legacy onBackPressed because build.sh compiles against android-23; migrate to OnBackInvokedCallback when compileSdk >= 33
     @Override public void onBackPressed() {
         if (mapPage.getVisibility() == View.VISIBLE) mapPage.setVisibility(View.GONE);
         else if (compassPage.getVisibility() == View.VISIBLE) hideCompass();
@@ -895,8 +916,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         addChatView(wrapRow);
     }
 
-    private void addImageBubble(String from, final byte[] jpeg, boolean mine) {
-        Bitmap thumb = Photos.decode(jpeg, 720);
+    private void addImageBubble(String from, final byte[] jpeg, Bitmap thumb, boolean mine) {
         if (thumb == null) return;
         LinearLayout wrapRow = row();
         wrapRow.setGravity(mine ? Gravity.END : Gravity.START);
@@ -927,13 +947,10 @@ public class MainActivity extends Activity implements Hub.Callback {
         addChatView(wrapRow);
     }
 
-    private void showPhoto(byte[] jpeg) {
-        Bitmap full = Photos.decode(jpeg, 2048);
-        if (full == null) return;
+    private void showPhoto(final byte[] jpeg) {
         final android.app.Dialog d = new android.app.Dialog(this,
                 android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        ImageView v = new ImageView(this);
-        v.setImageBitmap(full);
+        final ImageView v = new ImageView(this);
         v.setScaleType(ImageView.ScaleType.FIT_CENTER);
         v.setBackgroundColor(Color.BLACK);
         v.setOnClickListener(new View.OnClickListener() {
@@ -941,6 +958,17 @@ public class MainActivity extends Activity implements Hub.Callback {
         });
         d.setContentView(v);
         d.show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final Bitmap full = Photos.decode(jpeg, 2048);
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (full == null) d.dismiss();
+                        else v.setImageBitmap(full);
+                    }
+                });
+            }
+        }, "photo-view").start();
     }
 
     private void askPhotoSource() {
@@ -1030,8 +1058,9 @@ public class MainActivity extends Activity implements Hub.Callback {
                     } else {
                         hub.sendVideo(clip);
                         final java.io.File f = saveClip(clip);
+                        final Bitmap thumb = videoThumb(f);
                         ui.post(new Runnable() {
-                            @Override public void run() { addVideoBubble(myName, f, true); }
+                            @Override public void run() { addVideoBubble(myName, f, thumb, true); }
                         });
                     }
                 } catch (Exception e) {
@@ -1091,7 +1120,16 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (old != null) for (java.io.File f : old) f.delete();
     }
 
-    private void addVideoBubble(String from, final java.io.File clip, boolean mine) {
+    private static Bitmap videoThumb(java.io.File clip) {
+        try {
+            return android.media.ThumbnailUtils.createVideoThumbnail(clip.getPath(),
+                    MediaStore.Images.Thumbnails.MINI_KIND);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void addVideoBubble(String from, final java.io.File clip, Bitmap thumb, boolean mine) {
         LinearLayout wrapRow = row();
         wrapRow.setGravity(mine ? Gravity.END : Gravity.START);
         LinearLayout b = column();
@@ -1107,12 +1145,6 @@ public class MainActivity extends Activity implements Hub.Callback {
         FrameLayout frame = new FrameLayout(this);
         frame.setBackground(shape(0xFF1F2328, 12, 0));
         frame.setClipToOutline(true);
-        Bitmap thumb = null;
-        try {
-            thumb = android.media.ThumbnailUtils.createVideoThumbnail(clip.getPath(),
-                    MediaStore.Images.Thumbnails.MINI_KIND);
-        } catch (RuntimeException ignored) {
-        }
         if (thumb != null) {
             ImageView img = new ImageView(this);
             img.setImageBitmap(thumb);
@@ -1174,6 +1206,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 try {
                     final byte[] jpeg = Photos.prepare(getContentResolver(), uri);
+                    final Bitmap thumb = Photos.decode(jpeg, 720);
                     ui.post(new Runnable() {
                         @Override public void run() {
                             if (hub == null || !hub.hasPeers()) {
@@ -1181,7 +1214,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                                 return;
                             }
                             hub.sendImage(jpeg);
-                            addImageBubble(myName, jpeg, true);
+                            addImageBubble(myName, jpeg, thumb, true);
                         }
                     });
                 } catch (Exception e) {
@@ -1631,9 +1664,19 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void refreshMapStatus() {
         if (mapDownloading) return;
-        int n = Tiles.count(tileRoot());
-        mapStatus.setText(n == 0 ? "Belum ada peta tersimpan. Unduh saat masih ada internet."
-                : "Peta tersimpan: " + n + " petak. Bisa dipakai tanpa internet.");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final int n = Tiles.count(tileRoot());
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (!mapDownloading) {
+                            mapStatus.setText(n == 0 ? "Belum ada peta tersimpan. Unduh saat masih ada internet."
+                                    : "Peta tersimpan: " + n + " petak. Bisa dipakai tanpa internet.");
+                        }
+                    }
+                });
+            }
+        }, "tile-count").start();
     }
 
     private void askDownloadMap() {
@@ -1875,12 +1918,21 @@ public class MainActivity extends Activity implements Hub.Callback {
             return;
         }
         if (req != REQ_PHOTO || result != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
-        try {
-            saveProfile(myName, Avatars.fromUri(getContentResolver(), uri));
-        } catch (Exception e) {
-            toast("Foto tidak bisa dibuka");
-        }
+        final Uri uri = data.getData();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    final byte[] avatar = Avatars.fromUri(getContentResolver(), uri);
+                    ui.post(new Runnable() {
+                        @Override public void run() { saveProfile(myName, avatar); }
+                    });
+                } catch (Exception e) {
+                    ui.post(new Runnable() {
+                        @Override public void run() { toast("Foto tidak bisa dibuka"); }
+                    });
+                }
+            }
+        }, "avatar-prepare").start();
     }
 
     private void askName() {
@@ -1943,10 +1995,32 @@ public class MainActivity extends Activity implements Hub.Callback {
     @Override public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         if (code != REQ_PERMS) return;
         startLocation();
-        if (neededPermissions().length > 0) {
-            addSystemMessage("Izin Lokasi/Perangkat sekitar dan Mikrofon diperlukan agar aplikasi "
-                    + "bisa menemukan HP lain dan mengirim suara.");
+        String[] missing = neededPermissions();
+        if (missing.length == 0) return;
+        addSystemMessage("Izin Lokasi/Perangkat sekitar dan Mikrofon diperlukan agar aplikasi "
+                + "bisa menemukan HP lain dan mengirim suara.");
+        for (String p : missing) {
+            if (!shouldShowRequestPermissionRationale(p)) {
+                askOpenSettings();
+                break;
+            }
         }
+    }
+
+    private void askOpenSettings() {
+        new AlertDialog.Builder(this)
+                .setTitle("Izin diperlukan")
+                .setMessage("Izin Lokasi, Perangkat sekitar, atau Mikrofon dinonaktifkan. "
+                        + "Buka Pengaturan Aplikasi untuk mengaktifkannya agar bisa mencari dan berbicara dengan Tim.")
+                .setPositiveButton("Buka Pengaturan", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", getPackageName(), null));
+                        try { startActivity(i); } catch (RuntimeException ignored) { }
+                    }
+                })
+                .setNegativeButton("Nanti", null)
+                .show();
     }
 
     // ------------------------------------------------------ Wi-Fi Direct
@@ -2030,6 +2104,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onP2pEvent(Intent i) {
+        if (i == null) return;
         String action = i.getAction();
         if (WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION.equals(action)) {
             int st = i.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1);
@@ -2365,9 +2440,10 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     @Override public void onImage(final String from, final byte[] jpeg) {
+        final Bitmap thumb = Photos.decode(jpeg, 720);
         ui.post(new Runnable() {
             @Override public void run() {
-                addImageBubble(from, jpeg, false);
+                addImageBubble(from, jpeg, thumb, false);
                 notifyAway(Alerts.CH_MESSAGES, from, "Mengirim foto");
             }
         });
@@ -2386,9 +2462,10 @@ public class MainActivity extends Activity implements Hub.Callback {
         } catch (java.io.IOException e) {
             return;
         }
+        final Bitmap thumb = videoThumb(f);
         ui.post(new Runnable() {
             @Override public void run() {
-                addVideoBubble(from, f, false);
+                addVideoBubble(from, f, thumb, false);
                 notifyAway(Alerts.CH_MESSAGES, from, "Mengirim video");
             }
         });
