@@ -335,6 +335,15 @@ public class MainActivity extends Activity implements Hub.Callback {
                 @Override public void run() { if (!isFinishing()) askName(); }
             }, 1500);
         }
+        if (state == null) {
+            ui.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (!isFinishing() && Updater.hasInternet(MainActivity.this)) {
+                        checkUpdate(false);
+                    }
+                }
+            }, 4000);
+        }
     }
 
     @Override protected void onResume() {
@@ -2113,6 +2122,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         actions.add(new Runnable() { @Override public void run() { askEmergencyContacts(null); } });
         labels.add("Bagikan APK Offline (Tanpa Internet)");
         actions.add(new Runnable() { @Override public void run() { showApkShareDialog(); } });
+        labels.add("Cek Update Aplikasi (GitHub)");
+        actions.add(new Runnable() { @Override public void run() { checkUpdate(true); } });
         if (canBridge()) {
             labels.add("Jadi jembatan (percobaan)");
             actions.add(new Runnable() { @Override public void run() { askBridge(); } });
@@ -2130,6 +2141,91 @@ public class MainActivity extends Activity implements Hub.Callback {
                     @Override public void onClick(DialogInterface d, int which) { actions.get(which).run(); }
                 })
                 .show();
+    }
+
+    private void checkUpdate(final boolean manual) {
+        if (!Updater.hasInternet(this)) {
+            if (manual) {
+                toast("Tidak ada koneksi internet. Gunakan Bagikan APK Offline jika di lapangan.");
+            }
+            return;
+        }
+        if (manual) toast("Memeriksa versi terbaru di GitHub…");
+        Updater.check(this, new Updater.CheckCallback() {
+            @Override public void onResult(final Updater.Release rel, final boolean isNewer, final String error) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (isFinishing()) return;
+                        if (error != null) {
+                            if (manual) toast(error);
+                            return;
+                        }
+                        if (isNewer && rel != null) {
+                            showUpdateDialog(rel);
+                        } else if (manual && rel != null) {
+                            toast("Aplikasi sudah versi terbaru (v" + rel.versionName + ")");
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private void showUpdateDialog(final Updater.Release rel) {
+        String msg = "Versi baru Growth Internal v" + rel.versionName + " tersedia di GitHub.";
+        if (rel.notes != null && !rel.notes.isEmpty()) {
+            msg += "\n\n" + rel.notes;
+        }
+        msg += "\n\nFile APK akan diverifikasi dengan SHA-256 sebelum dipasang.";
+        new AlertDialog.Builder(this)
+                .setTitle("Update Tersedia (v" + rel.versionName + ")")
+                .setMessage(msg)
+                .setPositiveButton("Perbarui Sekarang", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        downloadAndInstallUpdate(rel);
+                    }
+                })
+                .setNegativeButton("Nanti", null)
+                .show();
+    }
+
+    private void downloadAndInstallUpdate(final Updater.Release rel) {
+        toast("Mengunduh update v" + rel.versionName + "…");
+        addSystemMessage("Mengunduh update Growth Internal v" + rel.versionName + " dari GitHub…");
+        Updater.download(this, rel, new Updater.DownloadCallback() {
+            @Override public void onProgress(final int percent) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (hub == null) {
+                            setStatus("Mengunduh update v" + rel.versionName + " (" + percent + "%)", AMBER);
+                        }
+                    }
+                });
+            }
+
+            @Override public void onReady(final java.io.File apkFile) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        if (isFinishing()) return;
+                        addSystemMessage("Update v" + rel.versionName + " terverifikasi (SHA-256 cocok). Membuka installer…");
+                        try {
+                            Updater.installApk(MainActivity.this);
+                        } catch (RuntimeException e) {
+                            toast("Gagal membuka installer APK: " + e.getMessage());
+                        }
+                    }
+                });
+            }
+
+            @Override public void onError(final String message) {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        toast(message);
+                        addSystemMessage(message);
+                    }
+                });
+            }
+        });
     }
 
     private void showApkShareDialog() {

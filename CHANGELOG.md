@@ -2,6 +2,17 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.20.0] - 2026-10-28
+
+### Ditambahkan & Dioptimalkan (Auto-Update Internal dari GitHub Releases & Kepatuhan Play Protect)
+- **Auto-Update Internal Aplikasi dari GitHub Releases (`Updater`, `MainActivity`, `CaptureProvider`)**:
+  - Menambahkan modul `Updater.java` yang memeriksa rilis terbaru di `https://api.github.com/repos/nafta121/growth-internal/releases/latest` secara otomatis saat aplikasi dibuka dan terhubung ke internet, maupun secara manual lewat menu profil **"Cek Update Aplikasi (GitHub)"**.
+  - Mengunduh `growth-internal.apk` ke penyimpanan sementara aplikasi (`CaptureProvider.UPDATE_APK`), memverifikasi keutuhan dan keaslian file menggunakan hash **SHA-256** terhadap `growth-internal.apk.sha256` sebelum pemasangan, serta langsung membuka installer sistem Android (`REQUEST_INSTALL_PACKAGES`).
+- **Kepatuhan Manifest & Identitas Sertifikat untuk Google Play Protect (`AndroidManifest.xml`, `build.sh`)**:
+  - Menambahkan deklarasi opsional `android.hardware.location.gps` (`android:required="false"`), izin `REQUEST_INSTALL_PACKAGES`, path `<grant-uri-permission android:path="/update.apk" />`, serta memperbarui *Distinguished Name (DN)* pembuat sertifikat di `build.sh` menjadi identitas organisasi (`CN=Tim Growth Indonesia, OU=Field Operations, O=Growth Indonesia, C=ID`).
+- **Pengujian Unit Otomatis (`AdpcmTest`)**:
+  - Menambahkan pengujian unit `githubReleaseUpdaterParsesJsonComparesSemverAndComputesSha256` untuk memverifikasi ekstraksi JSON GitHub Releases, perbandingan versi semantik + `versionCode`, dan perhitungan SHA-256.
+
 ## [0.19.0] - 2026-10-28
 
 ### Diperbaiki & Dioptimalkan (Remediasi 14 Temuan Audit `android-skills` + `/ponytail-audit`)

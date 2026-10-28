@@ -599,6 +599,46 @@ public class AdpcmTest {
         hubA.stop();
     }
 
+    @Test public void githubReleaseUpdaterParsesJsonComparesSemverAndComputesSha256() throws Exception {
+        String sampleJson = "{"
+                + "\"tag_name\": \"v0.20.0\","
+                + "\"body\": \"APK Growth Internal 0.20.0\\n\\n### Perubahan di v0.20.0\\n"
+                + "- Auto-update internal dari GitHub Releases\\n\\n### Cek keaslian file\\n"
+                + "- Versi build (versionCode): 118\\n"
+                + "- SHA-256 APK: `5bfff4619200b9719ae92adf87e915b30327c9c7e1ecb5d458ac2356d7b7e21c`\","
+                + "\"assets\": ["
+                + "{\"name\": \"growth-internal.apk\", \"browser_download_url\": \"https://example.com/growth-internal.apk\"},"
+                + "{\"name\": \"growth-internal.apk.sha256\", \"browser_download_url\": \"https://example.com/growth-internal.apk.sha256\"}"
+                + "]"
+                + "}";
+
+        Updater.Release rel = Updater.parseReleaseJson(sampleJson);
+        assertNotNull(rel);
+        assertEquals("0.20.0", rel.versionName);
+        assertEquals(118, rel.versionCode);
+        assertEquals("5bfff4619200b9719ae92adf87e915b30327c9c7e1ecb5d458ac2356d7b7e21c", rel.sha256);
+        assertEquals("https://example.com/growth-internal.apk", rel.apkUrl);
+        assertTrue(rel.notes.contains("Auto-update internal dari GitHub Releases"));
+
+        // Older semver -> true
+        assertTrue(Updater.isNewer("0.19.0", 117, rel));
+        // Same semver and same CI versionCode -> false
+        assertFalse(Updater.isNewer("0.20.0", 118, rel));
+        // Same semver but lower CI versionCode -> true
+        assertTrue(Updater.isNewer("0.20.0", 117, rel));
+        // Newer local semver -> false
+        assertFalse(Updater.isNewer("0.21.0", 22, rel));
+
+        java.io.File tempFile = java.nio.file.Files.createTempFile("upd-test", ".apk").toFile();
+        try {
+            java.nio.file.Files.write(tempFile.toPath(), "abc".getBytes(Hub.UTF8));
+            assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                    Updater.sha256File(tempFile));
+        } finally {
+            tempFile.delete();
+        }
+    }
+
     private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
         MeshAccess.Session sCentral = new MeshAccess.Session(
                 true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);

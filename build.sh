@@ -30,7 +30,7 @@ KEY_PASS=${KEY_PASS:-$KS_PASS}
 export KS_PASS KEY_PASS
 if [ ! -f "$KS" ]; then
   keytool -genkeypair -keystore "$KS" -storepass "$KS_PASS" -keypass "$KEY_PASS" -alias "$KEY_ALIAS" \
-    -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Growth Internal Debug" >/dev/null 2>&1
+    -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Tim Growth Indonesia, OU=Field Operations, O=Growth Indonesia, C=ID" >/dev/null 2>&1
 fi
 apksigner sign --ks "$KS" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
   --out "$OUT/growth-internal-debug.apk" "$OUT/aligned.apk"

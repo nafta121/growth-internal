@@ -20,7 +20,7 @@
 
 Saat kegiatan **Outbound, Experiential Learning, dan Corporate Training** berlangsung di area perkemahan, pegunungan, resort, atau *venue* luar ruang, sinyal seluler dan kuota internet sering kali tidak stabil atau hilang. **Growth Internal** menghubungkan HP Tim secara langsung lewat radio Wi‑Fi di dalam HP (Wi‑Fi Direct). Tidak butuh kartu SIM, router, server, atau Google Play Services. Seluruh Tim Fasilitator, PIC, Basecamp, dan Logistik tetap bisa berkomunikasi, memantau kesiapan pos, mengoordinasikan rotasi, serta mengirim panggilan prioritas.
 
-> **Status:** v0.19.0. Seluruh fitur komunikasi lapangan multi-transport (*Wi‑Fi Aware, Hotspot/LAN, Wi‑Fi Direct, Bluetooth L2CAP/RFCOMM, BLE Mesh, dan BlueRange MeshAccess Zero-Action Relay*), peta offline, kompas, dan protokol *mesh* telah teruji otomatis.
+> **Status:** v0.20.0. Seluruh fitur komunikasi lapangan multi-transport (*Wi‑Fi Aware, Hotspot/LAN, Wi‑Fi Direct, Bluetooth L2CAP/RFCOMM, BLE Mesh, dan BlueRange MeshAccess Zero-Action Relay*), auto-update internal dari GitHub Releases, peta offline, kompas, dan protokol *mesh* telah teruji otomatis.
 
 ## Tampilan
 
@@ -121,6 +121,7 @@ app/src/main/
     Ble.java               BLE 20-byte beacon, BLE Flood Mesh (TTL 5), AdvertisingWatchdog
     Adpcm.java             kompresi suara IMA ADPCM 4:1 (32 kbps) untuk jalur Bluetooth/BLE
     ApkShare.java          server HTTP lokal pembagi APK offline tanpa internet
+    Updater.java           auto-update internal dari GitHub Releases dengan verifikasi SHA-256
     Hub.java               grup: server/klien, multi-hop relay, ClusterId, Store-and-Forward, anti-penyamaran
     Link.java              satu koneksi TCP: thread baca/tulis, ping, batas ukuran
     Frame.java             tipe pesan dan batas ukurannya

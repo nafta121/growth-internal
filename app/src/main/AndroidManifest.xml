@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.growthinternal.app"
-    android:versionCode="20"
-    android:versionName="0.19.0">
+    android:versionCode="21"
+    android:versionName="0.20.0">
 
     <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="33" />
 
@@ -27,11 +27,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
     <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
     <application
@@ -61,6 +63,7 @@
             <grant-uri-permission android:path="/photo.jpg" />
             <grant-uri-permission android:path="/video.mp4" />
             <grant-uri-permission android:path="/growth-internal.apk" />
+            <grant-uri-permission android:path="/update.apk" />
         </provider>
     </application>
 </manifest>
