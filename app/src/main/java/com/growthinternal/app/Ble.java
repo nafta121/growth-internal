@@ -94,7 +94,7 @@ final class Ble {
                     .build();
             scanner.startScan(null, settings, scanCallback);
             scanning = true;
-        } catch (SecurityException | RuntimeException ignored) {
+        } catch (RuntimeException ignored) {
             scanning = false;
         }
     }
@@ -123,7 +123,7 @@ final class Ble {
                     .addServiceData(SERVICE_UUID, payload)
                     .build();
             advertiser.startAdvertising(settings, data, advertiseCallback);
-        } catch (SecurityException | RuntimeException ignored) {
+        } catch (RuntimeException ignored) {
             advertising = false;
         }
     }

@@ -132,7 +132,7 @@ final class Bt {
                     sock.connect();
                     hub.addStreamLink(sock.getInputStream(), sock.getOutputStream(), sock, true);
                     if (onConnected != null) onConnected.run();
-                } catch (IOException | SecurityException | RuntimeException e) {
+                } catch (IOException | RuntimeException e) {
                     if (sock != null) {
                         try { sock.close(); } catch (IOException ignored) {}
                     }
@@ -169,7 +169,12 @@ final class Bt {
         if (receiverRegistered) return;
         IntentFilter f = new IntentFilter(BluetoothDevice.ACTION_FOUND);
         if (Build.VERSION.SDK_INT >= 33) {
-            ctx.registerReceiver(receiver, f, Context.RECEIVER_EXPORTED);
+            try {
+                Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
+                        .invoke(ctx, receiver, f, 2 /* RECEIVER_EXPORTED */);
+            } catch (Exception e) {
+                ctx.registerReceiver(receiver, f);
+            }
         } else {
             ctx.registerReceiver(receiver, f);
         }
