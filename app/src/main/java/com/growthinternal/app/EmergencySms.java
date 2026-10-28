@@ -46,7 +46,7 @@ final class EmergencySms {
     static String body(String name, boolean hasLocation, double lat, double lon, float accuracy,
                        long fixAgeMinutes, int battery) {
         StringBuilder b = new StringBuilder();
-        b.append("SOS dari ").append(name).append(" (Growth Internal). Saya butuh bantuan.");
+        b.append("PRIORITAS dari ").append(name).append(" (Growth Internal). Saya butuh supporting/backup.");
         if (hasLocation) {
             b.append(String.format(Locale.US, " Lokasi: https://maps.google.com/?q=%.6f,%.6f", lat, lon));
             List<String> notes = new ArrayList<String>();

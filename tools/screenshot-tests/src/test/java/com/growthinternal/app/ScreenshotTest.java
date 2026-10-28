@@ -91,27 +91,27 @@ public class ScreenshotTest {
         freshInstall();
         MainActivity a = Robolectric.buildActivity(MainActivity.class).setup().get();
         org.robolectric.shadows.ShadowLooper.idleMainLooper(2, java.util.concurrent.TimeUnit.SECONDS);
-        call(a, "saveProfile", new Class<?>[] {String.class, byte[].class}, "Chalid", null);
+        call(a, "saveProfile", new Class<?>[] {String.class, byte[].class}, "Andi (PIC)", null);
         return a;
     }
 
     MainActivity group() throws Exception {
         MainActivity a = start();
-        set(a, "hub", new Hub("Chalid", null, a));
+        set(a, "hub", new Hub("Andi (PIC)", null, a));
         call(a, "setMyStatus", new Class<?>[] {int.class}, Presence.SAFE);
         call(a, "refreshAll", new Class<?>[0]);
-        a.onMemberJoined("Budi", null);
-        a.onMemberJoined("Sari", null);
-        a.onMemberJoined("Pak RT", null);
-        a.onPresence("Budi", presence(Presence.SAFE, 78, 0, 0));
-        a.onPresence("Sari", presence(Presence.NEED_HELP, 23, 0, 0));
-        a.onPresence("Pak RT", presence(Presence.SAFE, 91, 0, 0));
+        a.onMemberJoined("Budi (Pos 1)", null);
+        a.onMemberJoined("Sari (Pos 3)", null);
+        a.onMemberJoined("Raka (Basecamp)", null);
+        a.onPresence("Budi (Pos 1)", presence(Presence.SAFE, 78, 0, 0));
+        a.onPresence("Sari (Pos 3)", presence(Presence.NEED_HELP, 23, 0, 0));
+        a.onPresence("Raka (Basecamp)", presence(Presence.SAFE, 91, 0, 0));
         ShadowLooper.idleMainLooper();
-        a.onText("Budi", "Aku sudah di masjid, aman. Air mulai naik di jalan utama.");
+        a.onText("Budi (Pos 1)", "Peserta Kelompok Elang sudah selesai sesi Low Impact di Pos 1, siap rotasi.");
         call(a, "addBubble", new Class<?>[] {String.class, String.class, boolean.class},
-                "Chalid", "Oke, aku menuju ke sana lewat gang belakang.", true);
-        a.onAnnouncement("Pak RT", "Titik kumpul pindah ke lapangan SD 2. Bawa obat dan air minum.");
-        a.onText("Sari", "Kakiku terkilir, ada yang bisa jemput?");
+                "Andi (PIC)", "Siap, arahkan peserta menuju area Ice Breaking lapangan utama.", true);
+        a.onAnnouncement("Raka (Basecamp)", "Rotasi Pos 2 dimulai 10 menit lagi. Pastikan peralatan High Rope & helm sudah dicek.");
+        a.onText("Sari (Pos 3)", "Di Pos 3 butuh supporting/backup 2 tali karmantel & air mineral, Tim logistik bisa merapat?");
         return a;
     }
 
@@ -120,7 +120,7 @@ public class ScreenshotTest {
         snap(sp, "0-splash");
         MainActivity a = start();
         @SuppressWarnings("unchecked") List<WifiP2pDevice> peers = (List<WifiP2pDevice>) get(a, "peers");
-        String[][] devs = {{"Galaxy A15 Budi", "3"}, {"Redmi Note 13", "3"}, {"Oppo A78", "1"}};
+        String[][] devs = {{"Galaxy A15 - Budi (Pos 1)", "3"}, {"Redmi Note 13 - Sari", "3"}, {"Oppo A78 - Logistik", "1"}};
         for (String[] d : devs) {
             WifiP2pDevice w = new WifiP2pDevice();
             w.deviceName = d[0]; w.deviceAddress = "02:00:00:00:00:0" + d[1]; w.status = Integer.parseInt(d[1]);
@@ -131,20 +131,20 @@ public class ScreenshotTest {
         snap(a, "1-cari-perangkat");
 
         MainActivity g = group();
-        g.onTalkState("Budi", true);
+        g.onTalkState("Budi (Pos 1)", true);
         snap(g, "2-grup-dan-chat");
 
         MainActivity s = group();
         Location me = new Location("gps"); me.setLatitude(-6.20000); me.setLongitude(106.81660);
         set(s, "myLocation", me);
-        s.onPresence("Sari", presence(Presence.SOS, 21, -6.19850, 106.81480));
+        s.onPresence("Sari (Pos 3)", presence(Presence.SOS, 21, -6.19850, 106.81480));
         snap(s, "3-sos-masuk");
 
         MainActivity k = group();
         set(k, "myLocation", me);
-        k.onPresence("Budi", presence(Presence.SAFE, 78, -6.19780, 106.81720));
-        k.onPresence("Sari", presence(Presence.SOS, 21, -6.19850, 106.81480));
-        k.onPresence("Pak RT", presence(Presence.SAFE, 91, -6.20310, 106.81950));
+        k.onPresence("Budi (Pos 1)", presence(Presence.SAFE, 78, -6.19780, 106.81720));
+        k.onPresence("Sari (Pos 3)", presence(Presence.SOS, 21, -6.19850, 106.81480));
+        k.onPresence("Raka (Basecamp)", presence(Presence.SAFE, 91, -6.20310, 106.81950));
         call(k, "showCompass", new Class<?>[0]);
         ShadowLooper.idleMainLooper();
         call(k, "stopHeading", new Class<?>[0]);
@@ -159,7 +159,7 @@ public class ScreenshotTest {
         MainActivity m = group();
         set(m, "statusBeforeSos", Presence.SAFE);
         call(m, "setMyStatus", new Class<?>[] {int.class}, Presence.SOS);
-        m.onMemberLeft("Budi");
+        m.onMemberLeft("Budi (Pos 1)");
         snap(m, "4-sos-sendiri-dan-terputus");
 
         MainActivity e = start();
@@ -186,7 +186,7 @@ public class ScreenshotTest {
         call(d, "askAnnouncement", new Class<?>[0]);
         android.app.Dialog ann = org.robolectric.shadows.ShadowDialog.getLatestDialog();
         ((android.widget.EditText) findEdit(ann.getWindow().getDecorView()))
-                .setText("Semua kumpul di lapangan SD 2 sebelum jam 5 sore.");
+                .setText("Seluruh Tim Fasilitator kumpul di Basecamp pukul 16.30 untuk sesi Debriefing & Evaluasi.");
         snapDialog(d, "10-tulis-pengumuman");
         a.getSharedPreferences("growthinternal", 0).edit().putString("sms_contacts", "081234567890,081398765432").apply();
         call(d, "showProfileMenu", new Class<?>[0]);
@@ -198,34 +198,34 @@ public class ScreenshotTest {
         set(t, "callMode", true);
         call(t, "addSystemMessage", new Class<?>[] {String.class}, "Mode telepon aktif: mikrofon terus menyala.");
         call(t, "refreshControls", new Class<?>[0]);
-        t.onTalkState("Sari", true);
+        t.onTalkState("Sari (Pos 3)", true);
         snap(t, "13-mode-telepon");
 
         MainActivity f = group();
-        f.onImage("Budi", sampleJpeg());
+        f.onImage("Budi (Pos 1)", sampleJpeg());
         ShadowLooper.idleMainLooper();
         call(f, "addBubble", new Class<?>[] {String.class, String.class, boolean.class},
-                "Chalid", "Jalan depan masjid masih bisa dilewati?", true);
-        f.onText("Budi", "Bisa, air setinggi lutut. Lewat kiri.");
+                "Andi (PIC)", "Area lapangan utama sudah siap untuk sesi Energizer?", true);
+        f.onText("Budi (Pos 1)", "Sudah siap, properti games dan sound portable sudah terpasang.");
         ShadowLooper.idleMainLooper();
         snap(f, "14-kirim-foto");
 
         MainActivity v = group();
         call(v, "addBubble", new Class<?>[] {String.class, String.class, boolean.class},
-                "Chalid", "Ada yang bisa rekam kondisi jembatan?", true);
-        v.onVideoIncoming("Sari");
-        v.onVideo("Sari", new byte[64 * 1024]);
+                "Andi (PIC)", "Bisa kirimkan video simulasi briefing keamanan di Pos High Rope?", true);
+        v.onVideoIncoming("Sari (Pos 3)");
+        v.onVideo("Sari (Pos 3)", new byte[64 * 1024]);
         ShadowLooper.idleMainLooper();
-        v.onText("Sari", "Ini 10 detik lalu. Arus deras, jangan lewat sini.");
+        v.onText("Sari (Pos 3)", "Ini rekamannya. Harness dan jalur flying fox sudah aman digunakan.");
         ShadowLooper.idleMainLooper();
         snap(v, "15-kirim-video");
 
         MainActivity p = group();
         set(p, "myLocation", me);
         writeSampleTiles(new java.io.File(p.getFilesDir(), "tiles"), -6.2000, 106.8166);
-        p.onPresence("Budi", presence(Presence.SAFE, 78, -6.19780, 106.81720));
-        p.onPresence("Sari", presence(Presence.SOS, 21, -6.19850, 106.81480));
-        p.onPresence("Pak RT", presence(Presence.SAFE, 91, -6.20310, 106.81950));
+        p.onPresence("Budi (Pos 1)", presence(Presence.SAFE, 78, -6.19780, 106.81720));
+        p.onPresence("Sari (Pos 3)", presence(Presence.SOS, 21, -6.19850, 106.81480));
+        p.onPresence("Raka (Basecamp)", presence(Presence.SAFE, 91, -6.20310, 106.81950));
         call(p, "showMap", new Class<?>[0]);
         ShadowLooper.idleMainLooper();
         MapView mv = (MapView) get(p, "mapView");
@@ -234,7 +234,7 @@ public class ScreenshotTest {
         snap(p, "16-peta-offline");
 
         MainActivity j = group();
-        set(j, "upstreamInfo", Bridge.encode("DIRECT-xy-Pak RT", "rahasia123", "fe80::1"));
+        set(j, "upstreamInfo", Bridge.encode("DIRECT-xy-Basecamp", "rahasia123", "fe80::1"));
         call(j, "askBridge", new Class<?>[0]);
         snapDialog(j, "17-jadi-jembatan");
     }

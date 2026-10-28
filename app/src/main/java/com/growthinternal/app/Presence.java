@@ -24,10 +24,10 @@ final class Presence {
 
     static String label(int status) {
         switch (status) {
-            case SAFE: return "Aman";
-            case NEED_HELP: return "Butuh bantuan";
-            case INJURED: return "Terluka";
-            case SOS: return "SOS";
+            case SAFE: return "Standby";
+            case NEED_HELP: return "Butuh Backup";
+            case INJURED: return "Kendala";
+            case SOS: return "PRIORITAS";
             default: return "Belum diatur";
         }
     }

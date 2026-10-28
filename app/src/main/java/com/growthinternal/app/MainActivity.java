@@ -225,7 +225,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         f.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
         registerReceiver(receiver, f);
 
-        addSystemMessage("Tanpa internet dan sinyal. Nyalakan Wi‑Fi dan Lokasi di setiap HP, "
+        addSystemMessage("Komunikasi lapangan tanpa internet & sinyal. Nyalakan Wi‑Fi dan Lokasi di setiap HP Tim, "
                 + "lalu ketuk ikon cari.");
         if (ensurePermissions()) startLocation();
         // First launch: the default name is the phone model, which nobody in the group recognizes.
@@ -256,8 +256,8 @@ public class MainActivity extends Activity implements Hub.Callback {
             KeepAliveService.stop(this);
             return;
         }
-        String t = members.isEmpty() ? "Menunggu anggota" : "Tersambung dengan " + members.size() + " orang";
-        if (me.status == Presence.SOS) t = "SOS kamu aktif · " + t;
+        String t = members.isEmpty() ? "Menunggu Tim bergabung" : "Tersambung dengan " + members.size() + " orang";
+        if (me.status == Presence.SOS) t = "Panggilan Prioritas aktif · " + t;
         KeepAliveService.update(this, t);
     }
 
@@ -462,7 +462,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         gh.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { setGroupOpen(!groupOpen); }
         });
-        groupTitle = text("Grup", 15, TEXT, true);
+        groupTitle = text("Tim", 15, TEXT, true);
         gh.addView(groupTitle, wrap());
         memberStrip = row();
         LinearLayout.LayoutParams msl = grow();
@@ -503,9 +503,9 @@ public class MainActivity extends Activity implements Hub.Callback {
         talkBanner = talk;
         root.addView(talk, gapTop(fill(), 8));
 
-        // Disaster actions: SOS, own safety status, announcement to everyone.
+        // Field team actions: priority call, own status, instruction to everyone.
         LinearLayout chips = row();
-        sosChip = chip("SOS", Color.WHITE, DANGER);
+        sosChip = chip("Prioritas", Color.WHITE, DANGER);
         sosChip.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggleSos(); }
         });
@@ -513,7 +513,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         statusChip.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { askStatus(); }
         });
-        TextView announce = chip("Pengumuman", AMBER_TEXT, AMBER_SOFT);
+        TextView announce = chip("Instruksi", AMBER_TEXT, AMBER_SOFT);
         announce.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { askAnnouncement(); }
         });
@@ -661,7 +661,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         t.addView(sosDetail);
         top.addView(t, grow());
         c.addView(top, fill());
-        sosSilence = text("Matikan alarm", 14, DANGER, true);
+        sosSilence = text("Bisu Dering", 14, DANGER, true);
         sosSilence.setGravity(Gravity.CENTER);
         sosSilence.setPadding(dp(12), dp(8), dp(12), dp(8));
         sosSilence.setBackground(pressable(shape(Color.WHITE, 14, 0)));
@@ -782,7 +782,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             l.leftMargin = dp(4);
             memberStrip.addView(more, l);
         }
-        groupTitle.setText("Grup · " + shown);
+        groupTitle.setText("Tim · " + shown);
     }
 
     /** Small face for the folded group card; the ring shows status, green while talking. */
@@ -1230,7 +1230,7 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void refreshChips() {
         boolean sos = me.status == Presence.SOS;
-        sosChip.setText(sos ? "Batalkan SOS" : "SOS");
+        sosChip.setText(sos ? "Akhiri Prioritas" : "Prioritas");
         int st = sos ? statusBeforeSos : me.status;
         statusChip.setText(st == Presence.UNSET ? "Atur status" : "Status: " + Presence.label(st));
         statusChip.setTextColor(statusColor(sos ? statusBeforeSos : me.status));
@@ -1272,24 +1272,24 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void toggleSos() {
         if (me.status == Presence.SOS) {
             setMyStatus(statusBeforeSos == Presence.UNSET ? Presence.NEED_HELP : statusBeforeSos);
-            addSystemMessage("SOS dibatalkan.");
+            addSystemMessage("Panggilan prioritas diakhiri.");
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("Kirim SOS?")
-                .setMessage("Semua anggota grup akan mendengar alarm dan melihat lokasimu sampai SOS dibatalkan.\n\n"
-                        + "SOS + SMS juga menyiapkan SMS berisi lokasimu ke kontak darurat. "
+                .setTitle("Kirim Panggilan Prioritas?")
+                .setMessage("Semua HP Tim akan membunyikan dering perhatian dan menampilkan arah posisimu sampai panggilan diakhiri.\n\n"
+                        + "Prioritas + SMS juga menyiapkan SMS berisi koordinat posisimu ke nomor PIC / Basecamp. "
                         + "SMS butuh sinyal operator, tapi tidak butuh kuota internet.")
-                .setPositiveButton("Kirim SOS", new DialogInterface.OnClickListener() {
+                .setPositiveButton("Kirim Prioritas", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
                         statusBeforeSos = me.status;
                         setMyStatus(Presence.SOS);
                         addSystemMessage(hub != null && hub.hasPeers()
-                                ? "SOS terkirim ke semua anggota."
-                                : "SOS aktif. Akan terkirim begitu tersambung ke HP lain.");
+                                ? "Panggilan prioritas terkirim ke seluruh Tim."
+                                : "Panggilan prioritas aktif. Akan terkirim begitu tersambung ke HP Tim.");
                     }
                 })
-                .setNeutralButton("SOS + SMS", new DialogInterface.OnClickListener() {
+                .setNeutralButton("Prioritas + SMS", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
                         statusBeforeSos = me.status;
                         setMyStatus(Presence.SOS);
@@ -1323,7 +1323,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         i.putExtra("sms_body", body);
         try {
             startActivity(i);
-            addSystemMessage("Pesan SOS disiapkan di aplikasi SMS. Tekan kirim di sana. "
+            addSystemMessage("Laporan prioritas disiapkan di aplikasi SMS. Tekan kirim di sana. "
                     + "SMS hanya terkirim jika masih ada sinyal operator.");
         } catch (RuntimeException e) {
             toast("Tidak ada aplikasi SMS");
@@ -1339,15 +1339,15 @@ public class MainActivity extends Activity implements Hub.Callback {
         box.setPadding(dp(20), dp(8), dp(20), 0);
         box.addView(e);
         new AlertDialog.Builder(this)
-                .setTitle("Kontak darurat (maks. " + EmergencySms.MAX_CONTACTS + ")")
-                .setMessage("Nomor keluarga atau posko yang menerima SMS berisi lokasimu saat SOS. "
+                .setTitle("Kontak PIC / Basecamp (maks. " + EmergencySms.MAX_CONTACTS + ")")
+                .setMessage("Nomor PIC atau Basecamp yang menerima SMS berisi koordinat posisimu saat butuh supporting/backup prioritas. "
                         + "Pisahkan dengan koma.")
                 .setView(box)
                 .setPositiveButton("Simpan", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
                         List<String> n = EmergencySms.parseNumbers(e.getText().toString());
                         prefs.edit().putString("sms_contacts", EmergencySms.join(n, ",")).apply();
-                        toast(n.isEmpty() ? "Kontak darurat dikosongkan" : n.size() + " kontak darurat disimpan");
+                        toast(n.isEmpty() ? "Kontak PIC dikosongkan" : n.size() + " kontak PIC disimpan");
                         if (then != null) then.run();
                     }
                 })
@@ -1360,7 +1360,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         String[] labels = new String[values.length];
         for (int i = 0; i < values.length; i++) labels[i] = Presence.label(values[i]);
         new AlertDialog.Builder(this)
-                .setTitle("Bagaimana kondisimu?")
+                .setTitle("Status tugas lapangan")
                 .setItems(labels, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int which) {
                         if (me.status == Presence.SOS) {
@@ -1377,14 +1377,14 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void askAnnouncement() {
         if (!ready()) return;
         final EditText e = new EditText(this);
-        e.setHint("Contoh: Titik kumpul di lapangan balai desa");
+        e.setHint("Contoh: Rotasi pos 3 dimulai 10 menit lagi, peserta menuju Main Hall");
         e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         FrameLayout box = new FrameLayout(this);
         box.setPadding(dp(20), dp(8), dp(20), 0);
         box.addView(e);
         new AlertDialog.Builder(this)
-                .setTitle("Pengumuman ke semua anggota")
+                .setTitle("Instruksi ke seluruh Tim")
                 .setView(box)
                 .setPositiveButton("Kirim", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
@@ -1403,7 +1403,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         LinearLayout c = column();
         c.setBackground(shape(AMBER_SOFT, 16, 0));
         c.setPadding(dp(14), dp(10), dp(14), dp(10));
-        c.addView(text("PENGUMUMAN · " + from + " · " + now(), 11, AMBER_TEXT, true));
+        c.addView(text("INSTRUKSI · " + from + " · " + now(), 11, AMBER_TEXT, true));
         TextView t = text(body, 16, TEXT, true);
         t.setTextIsSelectable(true);
         c.addView(t, gapTop(fill(), 2));
@@ -1440,8 +1440,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         String first = sos.get(0);
         Presence p = presences.get(first);
         sosAvatar.setImageBitmap(Avatars.circle(first, members.get(first), dp(44)));
-        sosTitle.setText(sos.size() == 1 ? first + " minta tolong!"
-                : first + " dan " + (sos.size() - 1) + " orang lain minta tolong!");
+        sosTitle.setText(sos.size() == 1 ? first + " butuh supporting/backup segera!"
+                : first + " dan " + (sos.size() - 1) + " rekan Tim butuh supporting/backup!");
         String detail = whereIs(p);
         if (p.battery >= 0) detail += " · baterai " + p.battery + "%";
         sosDetail.setText(detail);
@@ -1544,7 +1544,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         LinearLayout head = row();
         LinearLayout titles = column();
         titles.addView(text("Peta offline", 20, TEXT, true));
-        titles.addView(text("Posisi anggota yang membagikan lokasi", 13, SUB, false));
+        titles.addView(text("Posisi Tim yang membagikan lokasi", 13, SUB, false));
         head.addView(titles, grow());
         TextView close = text("Tutup", 14, ACCENT, true);
         close.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -1744,9 +1744,9 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (compassPage.getVisibility() != View.VISIBLE) return;
         List<RadarView.Target> targets = new ArrayList<RadarView.Target>();
         compassList.removeAllViews();
-        compassList.addView(text("Anggota", 16, TEXT, true));
+        compassList.addView(text("Tim Lapangan", 16, TEXT, true));
         if (members.isEmpty()) {
-            compassList.addView(text("Belum ada anggota tersambung.", 14, SUB, false), gapTop(fill(), 8));
+            compassList.addView(text("Belum ada Tim tersambung.", 14, SUB, false), gapTop(fill(), 8));
         }
         for (Map.Entry<String, byte[]> e : members.entrySet()) {
             String n = e.getKey();
@@ -1820,7 +1820,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         actions.add(new Runnable() { @Override public void run() { askName(); } });
         labels.add(sharing ? "Bagikan lokasi: Nyala (ketuk untuk mematikan)" : "Bagikan lokasi: Mati (ketuk untuk menyalakan)");
         actions.add(new Runnable() { @Override public void run() { setShareLocation(!sharing); } });
-        labels.add(contacts == 0 ? "Kontak darurat SMS: belum diatur" : "Kontak darurat SMS: " + contacts + " nomor");
+        labels.add(contacts == 0 ? "Kontak PIC SMS: belum diatur" : "Kontak PIC SMS: " + contacts + " nomor");
         actions.add(new Runnable() { @Override public void run() { askEmergencyContacts(null); } });
         if (canBridge()) {
             labels.add("Jadi jembatan (percobaan)");
@@ -2411,10 +2411,10 @@ public class MainActivity extends Activity implements Hub.Callback {
                 boolean wasSos = old != null && old.status == Presence.SOS;
                 if (p.status == Presence.SOS && !wasSos) {
                     sosSilenced.remove(from);
-                    addSystemMessage(from + " mengirim SOS");
-                    notifyAway(Alerts.CH_SOS, "SOS: " + from + " minta tolong!", whereIs(p));
+                    addSystemMessage(from + " mengirim Panggilan Prioritas");
+                    notifyAway(Alerts.CH_SOS, "PRIORITAS: " + from + " butuh supporting/backup!", whereIs(p));
                 } else if (wasSos && p.status != Presence.SOS) {
-                    addSystemMessage(from + " membatalkan SOS");
+                    addSystemMessage(from + " mengakhiri Panggilan Prioritas");
                 }
                 refreshMembers();
                 refreshSos();
@@ -2427,7 +2427,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 addAnnouncement(from, text);
-                notifyAway(Alerts.CH_MESSAGES, "Pengumuman dari " + from, text);
+                notifyAway(Alerts.CH_MESSAGES, "Instruksi dari " + from, text);
                 vibrate(new long[] {0, 400});
                 beep(AudioManager.STREAM_NOTIFICATION, ToneGenerator.TONE_PROP_ACK, 400);
             }

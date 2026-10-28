@@ -1,30 +1,30 @@
 name: Usul fitur
-description: Ide yang membantu keluarga, rombongan, posko, atau tim Anda.
+description: Ide peningkatan fitur untuk mendukung operasional lapangan Tim Growth Indonesia.
 title: "[Usul] "
 labels: [enhancement]
 body:
   - type: textarea
     id: kebutuhan
     attributes:
-      label: Kebutuhan apa yang belum terpenuhi?
-      description: Ceritakan situasinya. Siapa, di mana, dan apa yang sulit dilakukan sekarang.
-      placeholder: "Saat mendaki, rombongan kami terpisah dan tidak tahu siapa yang sudah sampai pos."
+      label: Kebutuhan lapangan apa yang belum terpenuhi?
+      description: Ceritakan situasinya saat kegiatan Outbound atau Training berlangsung.
+      placeholder: "Saat rotasi pos di area camping ground, Tim perlu melihat..."
     validations:
       required: true
   - type: textarea
     id: usulan
     attributes:
       label: Usulan Anda
-      description: Bagaimana menurut Anda aplikasi sebaiknya membantu?
+      description: Bagaimana menurut Anda aplikasi sebaiknya membantu Tim di lapangan?
   - type: dropdown
     id: pemakai
     attributes:
-      label: Anda memakai Growth Internal untuk
+      label: Peran Anda di Tim Growth Indonesia
       multiple: true
       options:
-        - Keluarga atau tetangga
-        - Pendakian atau kegiatan alam
-        - Relawan atau posko bencana
-        - Sekolah atau kampus
-        - Perusahaan atau K3
+        - PIC / Basecamp
+        - Fasilitator / Co-Fasilitator Pos
+        - Tim High Rope & Safety
+        - Tim Logistik & Perlengkapan
+        - Dokumentasi & Media
         - Lainnya

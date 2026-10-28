@@ -25,8 +25,8 @@ final class Alerts {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         channel(nm, CH_STATUS, "Status koneksi", 2 /* IMPORTANCE_LOW */);
-        channel(nm, CH_MESSAGES, "Pesan dan pengumuman", 4 /* IMPORTANCE_HIGH */);
-        channel(nm, CH_SOS, "SOS darurat", 5 /* IMPORTANCE_MAX */);
+        channel(nm, CH_MESSAGES, "Pesan dan instruksi", 4 /* IMPORTANCE_HIGH */);
+        channel(nm, CH_SOS, "Panggilan Prioritas Lapangan", 5 /* IMPORTANCE_MAX */);
     }
 
     private static void channel(NotificationManager nm, String id, String name, int importance) {
