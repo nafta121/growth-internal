@@ -8,6 +8,7 @@ import android.bluetooth.le.AdvertiseSettings;
 import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
@@ -39,6 +40,8 @@ final class Ble {
             ParcelUuid.fromString("0000fd91-0000-1000-8000-00805f9b34fb");
     static final ParcelUuid MESH_UUID =
             ParcelUuid.fromString("0000fd92-0000-1000-8000-00805f9b34fb");
+    static final ParcelUuid MESH_ACCESS_UUID =
+            ParcelUuid.fromString("0000fe12-0000-1000-8000-00805f9b34fb");
     static final int MIN_AUTO_RSSI = -82;
 
     static final byte MESH_PRESENCE = 1;
@@ -156,19 +159,31 @@ final class Ble {
     private boolean meshAdvertising;
     private boolean scanning;
     private boolean connectedMode;
+    private boolean voiceActive;
+    private int activeScanMode = -1;
+    private long lastScanStartMs;
     private String lastAdvName;
     private Presence lastAdvPresence;
     private boolean lastAdvInGroup;
     private int lastAdvPsm;
     private int lastAdvClusterId;
     private static final long WATCHDOG_MS = 25000L;
+    private static final long STALL_RESTART_MS = 60000L;
+    static final long MIN_SCAN_RESTART_MS = 8000L;
+
+    private final Runnable applyScanModeRunnable = new Runnable() {
+        @Override public void run() {
+            restartScanIfModeChanged(System.currentTimeMillis());
+        }
+    };
 
     private final Runnable watchdogRunnable = new Runnable() {
         @Override public void run() {
             if (adapter != null && adapter.isEnabled()) {
                 long now = System.currentTimeMillis();
-                // Spectre silent-stall recovery: restart BLE scanner if no callbacks arrived for WATCHDOG_MS
-                if (scanning && lastScanResultMs > 0 && now - lastScanResultMs > WATCHDOG_MS) {
+                // Spectre silent-stall recovery: restart BLE scanner if no callbacks arrived for STALL_RESTART_MS
+                if (scanning && lastScanResultMs > 0 && now - lastScanResultMs > STALL_RESTART_MS
+                        && now - lastScanStartMs >= MIN_SCAN_RESTART_MS) {
                     if (scanner != null) {
                         try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}
                     }
@@ -305,15 +320,59 @@ final class Ble {
         return c != null ? c : 0;
     }
 
+    /**
+     * Explicit hardware-offloaded ScanFilters so Android 8.1+ never blocks BLE discovery,
+     * 15-hop flood mesh, or BlueRange MeshAccess while the screen is turned off.
+     */
+    static List<ScanFilter> buildScanFilters() {
+        List<ScanFilter> filters = new ArrayList<ScanFilter>(3);
+        filters.add(new ScanFilter.Builder()
+                .setServiceData(SERVICE_UUID, new byte[0], new byte[0])
+                .build());
+        filters.add(new ScanFilter.Builder()
+                .setServiceData(MESH_UUID, new byte[0], new byte[0])
+                .build());
+        filters.add(new ScanFilter.Builder()
+                .setServiceUuid(MESH_ACCESS_UUID)
+                .build());
+        return filters;
+    }
+
+    int effectiveScanMode() {
+        if (voiceActive) return ScanSettings.SCAN_MODE_LOW_POWER;
+        if (connectedMode) return ScanSettings.SCAN_MODE_BALANCED;
+        return ScanSettings.SCAN_MODE_LOW_LATENCY;
+    }
+
     /** Scales BLE scan duty-cycle down while connected so 2.4 GHz airtime stays free for Wi-Fi/L2CAP voice. */
     void setConnectedMode(boolean connected) {
         if (this.connectedMode == connected) return;
         this.connectedMode = connected;
-        if (scanning && scanner != null) {
-            try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}
-            scanning = false;
-            startScan();
+        restartScanIfModeChanged(System.currentTimeMillis());
+    }
+
+    /** Throttles 2.4 GHz BLE scanning to LOW_POWER during live PTT/Call voice to eliminate antenna contention. */
+    void setVoiceActive(boolean active) {
+        if (this.voiceActive == active) return;
+        this.voiceActive = active;
+        restartScanIfModeChanged(System.currentTimeMillis());
+    }
+
+    boolean canRestartScanNow(long nowMs) {
+        return lastScanStartMs == 0L || (nowMs - lastScanStartMs) >= MIN_SCAN_RESTART_MS;
+    }
+
+    private void restartScanIfModeChanged(long nowMs) {
+        handler.removeCallbacks(applyScanModeRunnable);
+        if (!scanning || scanner == null || effectiveScanMode() == activeScanMode) return;
+        if (!canRestartScanNow(nowMs)) {
+            long waitMs = Math.max(250L, MIN_SCAN_RESTART_MS - (nowMs - lastScanStartMs));
+            handler.postDelayed(applyScanModeRunnable, waitMs);
+            return;
         }
+        try { scanner.stopScan(scanCallback); } catch (RuntimeException ignored) {}
+        scanning = false;
+        startScan();
     }
 
     // shortcut: uses reflection for BLE 5 Coded PHY scan settings because build.sh compiles against android-23; call directly when compileSdk >= 26
@@ -323,10 +382,9 @@ final class Ble {
             if (!adapter.isEnabled()) return;
             scanner = adapter.getBluetoothLeScanner();
             if (scanner == null) return;
+            int mode = effectiveScanMode();
             ScanSettings.Builder sb = new ScanSettings.Builder()
-                    .setScanMode(connectedMode
-                            ? ScanSettings.SCAN_MODE_BALANCED
-                            : ScanSettings.SCAN_MODE_LOW_LATENCY);
+                    .setScanMode(mode);
             if (Build.VERSION.SDK_INT >= 26) {
                 try {
                     ScanSettings.Builder.class.getMethod("setLegacy", boolean.class).invoke(sb, false);
@@ -334,9 +392,12 @@ final class Ble {
                 } catch (Exception ignored) {
                 }
             }
-            scanner.startScan(null, sb.build(), scanCallback);
+            scanner.startScan(buildScanFilters(), sb.build(), scanCallback);
             scanning = true;
-            lastScanResultMs = System.currentTimeMillis();
+            activeScanMode = mode;
+            long now = System.currentTimeMillis();
+            lastScanStartMs = now;
+            lastScanResultMs = now;
             handler.removeCallbacks(watchdogRunnable);
             handler.postDelayed(watchdogRunnable, WATCHDOG_MS);
         } catch (RuntimeException ignored) {
@@ -459,6 +520,7 @@ final class Ble {
     void stop() {
         handler.removeCallbacks(watchdogRunnable);
         handler.removeCallbacks(stopMeshRunnable);
+        handler.removeCallbacks(applyScanModeRunnable);
         meshTxQueue.clear();
         activeMeshTx = null;
         if (scanning && scanner != null) {

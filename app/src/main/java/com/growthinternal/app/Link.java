@@ -24,8 +24,8 @@ final class Link {
     static final long MAX_AUDIO_AGE_MS = 350L;
     // Each side pings when idle; a link silent for longer than the timeout is dropped,
     // so a phone walking out of range is noticed within seconds.
-    private static final int PING_MS = 3000;
-    private static final int TIMEOUT_MS = 10000;
+    static final int PING_MS = 3000;
+    static final int TIMEOUT_MS = 25000;
 
     private final Closeable raw;
     final boolean lowBandwidth;
@@ -50,6 +50,7 @@ final class Link {
     volatile boolean relay;
     volatile boolean sentBridge;
     volatile Link replacedLink;
+    volatile java.net.InetSocketAddress reconnectTarget;
 
     Link(Socket socket, Listener listener) throws IOException {
         this(configure(socket).getInputStream(), socket.getOutputStream(), socket, false, listener);
@@ -65,6 +66,7 @@ final class Link {
 
     private static Socket configure(Socket socket) throws IOException {
         socket.setTcpNoDelay(true);
+        try { socket.setKeepAlive(true); } catch (IOException ignored) { }
         socket.setSoTimeout(TIMEOUT_MS);
         return socket;
     }
@@ -117,9 +119,14 @@ final class Link {
 
     private void writeLoop() {
         try {
+            long lastPingOrFlushMs = System.currentTimeMillis();
             while (!closed) {
+                long now = System.currentTimeMillis();
                 Frame f = vital.poll();
                 if (f == null) f = queue.poll();
+                if (f == null && now - lastPingOrFlushMs >= PING_MS) {
+                    f = new Frame(Frame.PING, "", null);
+                }
                 if (f == null) f = bulk.poll();
                 if (f == null) f = queue.poll(PING_MS, TimeUnit.MILLISECONDS);
                 if (f == WAKE) {
@@ -128,6 +135,7 @@ final class Link {
                     if (f == null) f = bulk.poll();
                     if (f == null) {
                         out.flush();
+                        lastPingOrFlushMs = System.currentTimeMillis();
                         continue;
                     }
                 }
@@ -140,7 +148,13 @@ final class Link {
                 out.writeUTF(f.sender);
                 out.writeInt(f.payload.length);
                 out.write(f.payload);
-                if (vital.isEmpty() && (queue.isEmpty() || queue.peek() == WAKE)) out.flush();
+                long afterWrite = System.currentTimeMillis();
+                if (f.type == Frame.PING
+                        || afterWrite - lastPingOrFlushMs >= PING_MS
+                        || (vital.isEmpty() && (queue.isEmpty() || queue.peek() == WAKE))) {
+                    out.flush();
+                    lastPingOrFlushMs = afterWrite;
+                }
             }
         } catch (InterruptedException ignored) {
         } catch (IOException e) {

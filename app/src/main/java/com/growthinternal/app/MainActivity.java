@@ -40,8 +40,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.Vibrator;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -118,6 +120,8 @@ public class MainActivity extends Activity implements Hub.Callback {
     private java.net.InetAddress uplinkTarget;
     private boolean isOwner;
     private boolean p2pGroupActive;
+    private java.net.InetAddress lastP2pOwnerAddress;
+    private int p2pClientRetries;
     private Aware aware;
     private Lan lan;
     private Bt bt;
@@ -363,10 +367,12 @@ public class MainActivity extends Activity implements Hub.Callback {
     @Override protected void onResume() {
         super.onResume();
         visible = true;
+        updateKeepAlive();
     }
 
     @Override protected void onPause() {
         visible = false;
+        updateKeepAlive();
         super.onPause();
     }
 
@@ -376,11 +382,18 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void updateKeepAlive() {
-        if (hub == null) {
+        if (isFinishing() || prefs == null
+                || (hub == null && (coordinator.isPaused() || !prefs.contains("name")))) {
             KeepAliveService.stop(this);
             return;
         }
-        String t = members.isEmpty() ? "Menunggu Tim bergabung" : "Tersambung dengan " + members.size() + " orang";
+        String t;
+        if (hub == null) {
+            t = "Siaga Mesh Lapangan · Menunggu rekan di sekitar";
+        } else {
+            t = members.isEmpty() ? "Menunggu Tim bergabung" : "Tersambung dengan " + members.size() + " orang";
+        }
+        if (callMode) t = "Mode Telepon aktif · " + t;
         if (me.status == Presence.SOS) t = "Panggilan Prioritas aktif · " + t;
         KeepAliveService.update(this, t);
     }
@@ -2142,6 +2155,16 @@ public class MainActivity extends Activity implements Hub.Callback {
         actions.add(new Runnable() { @Override public void run() { showApkShareDialog(); } });
         labels.add("Cek Update Aplikasi (GitHub)");
         actions.add(new Runnable() { @Override public void run() { checkUpdate(true); } });
+        final boolean batteryFree = isIgnoringBatteryOptimizations();
+        labels.add(batteryFree
+                ? "Baterai latar belakang: Aktif tanpa batas"
+                : "Baterai latar belakang: Izinkan tanpa batas");
+        actions.add(new Runnable() {
+            @Override public void run() {
+                if (batteryFree) toast("Aplikasi sudah diizinkan berjalan tanpa batas baterai.");
+                else requestIgnoreBatteryOptimizations();
+            }
+        });
         if (canBridge()) {
             labels.add("Jadi jembatan (percobaan)");
             actions.add(new Runnable() { @Override public void run() { askBridge(); } });
@@ -2378,7 +2401,29 @@ public class MainActivity extends Activity implements Hub.Callback {
                     activeGroupOwner(), groupMemberCount(), cid);
         }
         refreshAll();
+        updateKeepAlive();
         if (hub != null) toast("Nama/foto baru terlihat oleh anggota saat terhubung lagi");
+    }
+
+    private boolean isIgnoringBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        return pm == null || pm.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    private void requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < 23) return;
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (RuntimeException e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (RuntimeException ignored) {
+                toast("Buka Pengaturan Baterai HP dan pilih Tanpa Pembatasan untuk Growth Internal.");
+            }
+        }
     }
 
     // ------------------------------------------------------- permissions
@@ -2863,6 +2908,8 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void disconnect() {
         coordinator.pauseAfterDisconnect();
         p2pGroupActive = false;
+        lastP2pOwnerAddress = null;
+        p2pClientRetries = 0;
         stopHub();
         stopBridge();
         upstreamInfo = null;
@@ -2915,6 +2962,8 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void onConnection(WifiP2pInfo info) {
         if (info != null && info.groupFormed) {
             p2pGroupActive = true;
+            lastP2pOwnerAddress = info.isGroupOwner ? null : info.groupOwnerAddress;
+            p2pClientRetries = 0;
             if (hub != null) return;
             hub = initHub(info.isGroupOwner);
             if (info.isGroupOwner) {
@@ -2934,6 +2983,8 @@ public class MainActivity extends Activity implements Hub.Callback {
             if (info.isGroupOwner) setStatus("Menunggu anggota bergabung", AMBER);
         } else if (hub != null && p2pGroupActive) {
             p2pGroupActive = false;
+            lastP2pOwnerAddress = null;
+            p2pClientRetries = 0;
             boolean hadMembers = !members.isEmpty();
             stopHub();
             refreshAll();
@@ -3094,17 +3145,26 @@ public class MainActivity extends Activity implements Hub.Callback {
             hub.stop();
             hub = null;
         }
-        if (ble != null) ble.setConnectedMode(false);
+        if (ble != null) {
+            ble.setVoiceActive(false);
+            ble.setConnectedMode(false);
+        }
         ui.removeCallbacks(presenceTick);
-        KeepAliveService.stop(this);
         members.clear();
         talkers.clear();
         presences.clear();
         bleSosNames.clear();
         sosSilenced.clear();
         stopAlarm();
+        updateKeepAlive();
         audio.setMode(AudioManager.MODE_NORMAL);
         audio.setSpeakerphoneOn(false);
+    }
+
+    private void syncVoiceCoexistence() {
+        if (ble != null) {
+            ble.setVoiceActive(callMode || voice.isCapturing() || !talkers.isEmpty());
+        }
     }
 
     // ------------------------------------------------------- talk & chat
@@ -3183,6 +3243,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         }
         h.sendTalkState(true);
         if (aware != null) aware.broadcastSidelinkTalk(myName, true);
+        syncVoiceCoexistence();
         refreshControls();
     }
 
@@ -3192,6 +3253,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             if (hub != null) hub.sendTalkState(false);
             if (aware != null) aware.broadcastSidelinkTalk(myName, false);
         }
+        syncVoiceCoexistence();
         refreshControls();
     }
 
@@ -3213,6 +3275,8 @@ public class MainActivity extends Activity implements Hub.Callback {
             stopTalking();
             addSystemMessage("Mode telepon ditutup.");
         }
+        syncVoiceCoexistence();
+        updateKeepAlive();
         refreshControls();
     }
 
@@ -3229,6 +3293,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 if (hub == null) return;
                 boolean isNew = !members.containsKey(name);
+                p2pClientRetries = 0;
                 bleSosNames.remove(name);
                 members.put(name, photo);
                 if (ble != null) ble.setConnectedMode(true);
@@ -3253,6 +3318,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 talkers.remove(name);
                 presences.remove(name);
                 voice.drop(name);
+                syncVoiceCoexistence();
                 if (ble != null) ble.setConnectedMode(!members.isEmpty());
                 refreshCompass();
                 refreshMembers();
@@ -3380,6 +3446,21 @@ public class MainActivity extends Activity implements Hub.Callback {
     @Override public void onRejected(final String reason) {
         ui.post(new Runnable() {
             @Override public void run() {
+                if (p2pGroupActive && !isOwner && lastP2pOwnerAddress != null
+                        && p2pClientRetries < 3
+                        && (reason == null || !reason.startsWith("Nama "))) {
+                    p2pClientRetries++;
+                    final java.net.InetAddress target = lastP2pOwnerAddress;
+                    setStatus("Menyambung ulang ke pemilik grup…", AMBER);
+                    ui.postDelayed(new Runnable() {
+                        @Override public void run() {
+                            if (p2pGroupActive && hub != null && !isOwner) {
+                                hub.startClient(target);
+                            }
+                        }
+                    }, 800L);
+                    return;
+                }
                 alertLost(reason);
                 disconnect();
             }
@@ -3394,6 +3475,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 if (talking) talkers.add(from); else talkers.remove(from);
+                syncVoiceCoexistence();
                 refreshTalkers();
                 refreshMembers();
             }

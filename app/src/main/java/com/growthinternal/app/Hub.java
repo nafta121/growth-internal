@@ -66,6 +66,8 @@ final class Hub implements Link.Listener {
 
     private final Callback cb;
     private final List<Link> links = new CopyOnWriteArrayList<Link>();
+    private final Set<InetSocketAddress> activeReconnects = java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<InetSocketAddress, Boolean>());
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
     private final Clips.Assembler clips = new Clips.Assembler();
     private final Clips.Assembler images = new Clips.Assembler(Clips.IMAGE_CHUNK);
@@ -138,6 +140,8 @@ final class Hub implements Link.Listener {
     }
 
     boolean hasPeers() { return !links.isEmpty(); }
+
+    List<Link> activeLinks() { return new ArrayList<Link>(links); }
 
     boolean hasMember(String name) {
         synchronized (members) { return members.containsKey(name); }
@@ -214,13 +218,14 @@ final class Hub implements Link.Listener {
 
     void startClient(final InetAddress host) {
         owner = false;
+        final InetSocketAddress target = new InetSocketAddress(host, port);
         new Thread(new Runnable() {
             @Override public void run() {
                 for (int attempt = 0; attempt < 15 && !stopped; attempt++) {
                     try {
                         Socket s = new Socket();
-                        s.connect(new InetSocketAddress(host, port), 4000);
-                        addLink(s);
+                        s.connect(target, 4000);
+                        addLink(s, target);
                         return;
                     } catch (IOException e) {
                         try { Thread.sleep(1000); } catch (InterruptedException ie) { return; }
@@ -232,13 +237,14 @@ final class Hub implements Link.Listener {
     }
 
     void connectPeer(final InetAddress host, final int peerPort, final Runnable onFail) {
+        final InetSocketAddress target = new InetSocketAddress(host, peerPort);
         new Thread(new Runnable() {
             @Override public void run() {
                 for (int attempt = 0; attempt < 4 && !stopped; attempt++) {
                     try {
                         Socket s = new Socket();
-                        s.connect(new InetSocketAddress(host, peerPort), 3500);
-                        addLink(s);
+                        s.connect(target, 3500);
+                        addLink(s, target);
                         return;
                     } catch (IOException e) {
                         try { Thread.sleep(800); } catch (InterruptedException ie) { return; }
@@ -287,8 +293,13 @@ final class Hub implements Link.Listener {
     }
 
     private void addLink(Socket s) throws IOException {
+        addLink(s, null);
+    }
+
+    private void addLink(Socket s, InetSocketAddress reconnectTarget) throws IOException {
         if (stopped) { s.close(); return; }
         Link link = new Link(s, this);
+        link.reconnectTarget = reconnectTarget;
         link.send(buildClusterFrame());
         link.send(new Frame(Frame.HELLO, myName, myPhoto));
         byte[] p = myPresence;
@@ -759,6 +770,42 @@ final class Hub implements Link.Listener {
         if (!links.isEmpty()) {
             broadcast(buildClusterFrame(), null);
         }
+        final String lostPeer = link.peerName;
+        final InetSocketAddress target = link.reconnectTarget;
+        if (!stopped && !wasUplink && target != null && !stillReachable(lostPeer)) {
+            scheduleAutoReconnect(lostPeer, target);
+        }
+    }
+
+    private void scheduleAutoReconnect(final String expectedPeer, final InetSocketAddress target) {
+        if (!activeReconnects.add(target)) return;
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                final long[] delays = { 450L, 1200L, 2500L, 4500L };
+                try {
+                    for (long delay : delays) {
+                        try { Thread.sleep(delay); } catch (InterruptedException ie) { return; }
+                        if (stopped || hasMember(expectedPeer) || links.size() >= MAX_LINKS) return;
+                        Socket s = new Socket();
+                        try {
+                            s.connect(target, 3000);
+                            if (stopped || hasMember(expectedPeer)) {
+                                s.close();
+                                return;
+                            }
+                            addLink(s, target);
+                            return;
+                        } catch (IOException ignored) {
+                            try { s.close(); } catch (IOException ignoredClose) { }
+                        }
+                    }
+                } finally {
+                    activeReconnects.remove(target);
+                }
+            }
+        }, "hub-reconnect");
+        t.setDaemon(true);
+        t.start();
     }
 
     private Link findHandoverLink(Link incoming, String sender) {

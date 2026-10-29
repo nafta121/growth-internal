@@ -1011,6 +1011,122 @@ public class AdpcmTest {
         hubA.stop();
     }
 
+    @Test public void voiceJitterBufferLinkAutoReconnectAndScreenOffSurvival() throws Exception {
+        // 1. Stage 1: Voice Adaptive Pre-Roll Jitter Buffer, Latency Cap, & Zero-Underrun PLC
+        Voice.JitterBuffer jb = new Voice.JitterBuffer();
+        byte[] f0 = new byte[Voice.FRAME_BYTES];
+        byte[] f1 = new byte[Voice.FRAME_BYTES];
+        byte[] f2 = new byte[Voice.FRAME_BYTES];
+        for (int i = 0; i < 320; i++) {
+            f0[i * 2] = 20;
+            f1[i * 2] = 40;
+            f2[i * 2] = 60;
+        }
+        jb.offer(f0, 1000L);
+        assertFalse("1 frame must wait in pre-roll to absorb RF jitter", jb.isPrimed());
+        assertNull(jb.pollNext(1010L));
+
+        jb.offer(f1, 1020L);
+        assertFalse("2 frames must still hold pre-roll", jb.isPrimed());
+        assertNull(jb.pollNext(1030L));
+
+        jb.offer(f2, 1040L);
+        assertTrue("3 frames (60 ms) must prime playout", jb.isPrimed());
+        assertArrayEquals(f0, jb.pollNext(1040L));
+        assertArrayEquals(f1, jb.pollNext(1060L));
+        assertArrayEquals(f2, jb.pollNext(1080L));
+
+        // Simulate late packet #3: jitter buffer synthesizes up to MAX_PLC_FRAMES (40 ms) instead of underrunning
+        byte[] plc1 = jb.pollNext(1100L);
+        byte[] plc2 = jb.pollNext(1120L);
+        assertNotNull("Late packet slot 1 must synthesize PLC frame", plc1);
+        assertNotNull("Late packet slot 2 must synthesize PLC frame", plc2);
+        assertEquals(Voice.FRAME_BYTES, plc1.length);
+        assertEquals(Voice.FRAME_BYTES, plc2.length);
+        assertNull("After MAX_PLC_FRAMES, spurt ends cleanly and resets pre-roll", jb.pollNext(1140L));
+        assertFalse(jb.isPrimed());
+
+        // Bounded latency cap: burst of 16 frames trims oldest 4 so delay never exceeds 240 ms (12 frames)
+        for (int i = 0; i < 16; i++) {
+            byte[] burst = new byte[Voice.FRAME_BYTES];
+            burst[0] = (byte) i;
+            jb.offer(burst, 2000L + i);
+        }
+        assertEquals(Voice.MAX_JITTER_FRAMES, jb.size());
+        byte[] oldestKept = jb.pollNext(2020L);
+        assertNotNull(oldestKept);
+        assertEquals("Oldest 4 stale burst frames must be trimmed", 4, oldestKept[0]);
+
+        // 2. Stage 1 & 3: BLE 2.4 GHz Voice Coexistence & Screen-Off Hardware ScanFilters
+        Ble ble = new Ble(null);
+        assertEquals(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY, ble.effectiveScanMode());
+        ble.setConnectedMode(true);
+        assertEquals(android.bluetooth.le.ScanSettings.SCAN_MODE_BALANCED, ble.effectiveScanMode());
+        ble.setVoiceActive(true);
+        assertEquals("Active voice must throttle BLE scan to LOW_POWER to free 2.4 GHz antenna",
+                android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_POWER, ble.effectiveScanMode());
+        ble.setVoiceActive(false);
+        assertEquals(android.bluetooth.le.ScanSettings.SCAN_MODE_BALANCED, ble.effectiveScanMode());
+
+        java.util.List<android.bluetooth.le.ScanFilter> filters = Ble.buildScanFilters();
+        assertEquals(3, filters.size());
+        android.bluetooth.le.ScanFilter emptyFilter = new android.bluetooth.le.ScanFilter.Builder().build();
+        for (android.bluetooth.le.ScanFilter sf : filters) {
+            assertFalse("Screen-off BLE ScanFilter must not be empty on Android 8.1+",
+                    emptyFilter.equals(sf));
+        }
+        assertEquals(Ble.SERVICE_UUID, filters.get(0).getServiceDataUuid());
+        assertEquals(Ble.MESH_UUID, filters.get(1).getServiceDataUuid());
+        assertEquals(Ble.MESH_ACCESS_UUID, filters.get(2).getServiceUuid());
+
+        // 3. Stage 3: KeepAliveService Low-Latency Wi-Fi Lock (Android 10+), MulticastLock & START_STICKY
+        assertEquals(KeepAliveService.WIFI_MODE_LOW_LATENCY, KeepAliveService.wifiLockModeForSdk(29));
+        assertEquals(KeepAliveService.WIFI_MODE_LOW_LATENCY, KeepAliveService.wifiLockModeForSdk(34));
+        assertEquals(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                KeepAliveService.wifiLockModeForSdk(28));
+
+        KeepAliveService svc = org.robolectric.Robolectric.buildService(KeepAliveService.class).create().get();
+        int sticky = svc.onStartCommand(
+                new android.content.Intent().putExtra(KeepAliveService.EXTRA_TEXT, "Mode Telepon aktif"),
+                0, 1);
+        assertEquals("KeepAliveService must return START_STICKY for background survival",
+                android.app.Service.START_STICKY, sticky);
+        svc.onDestroy();
+
+        // 4. Stage 2: 25s Link Timeout & Seamless In-Session TCP Auto-Reconnect
+        assertEquals(25000, Link.TIMEOUT_MS);
+        InetAddress lo = InetAddress.getByName("127.0.0.1");
+        int port = 19177;
+        HubTest.Rec rOwner = new HubTest.Rec();
+        HubTest.Rec rClient = new HubTest.Rec();
+        Hub ownerHub = new Hub("Basecamp", null, rOwner).port(port);
+        ownerHub.startServer(lo);
+        Thread.sleep(200);
+
+        Hub clientHub = new Hub("Pos Tebing", null, rClient).port(port);
+        clientHub.startClient(lo);
+        HubTest.waitFor(rOwner, "join:Pos Tebing");
+        HubTest.waitFor(rClient, "join:Basecamp");
+
+        // Forcibly drop the live TCP link mid-session (simulating a sudden RF drop / screen-off socket reset)
+        rOwner.log.clear();
+        rClient.log.clear();
+        assertFalse(clientHub.activeLinks().isEmpty());
+        clientHub.activeLinks().get(0).close();
+        HubTest.waitFor(rClient, "left:Basecamp");
+
+        // Verify Hub automatically reconnects in the background and restores voice & chat!
+        HubTest.waitFor(rOwner, "join:Pos Tebing");
+        HubTest.waitFor(rClient, "join:Basecamp");
+        clientHub.sendAudio(new byte[Voice.FRAME_BYTES]);
+        ownerHub.sendText("tersambung-kembali");
+        HubTest.waitFor(rOwner, "audio:Pos Tebing:640");
+        HubTest.waitFor(rClient, "text:Basecamp:tersambung-kembali");
+
+        clientHub.stop();
+        ownerHub.stop();
+    }
+
     private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
         MeshAccess.Session sCentral = new MeshAccess.Session(
                 true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);

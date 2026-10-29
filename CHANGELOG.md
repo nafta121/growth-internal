@@ -2,6 +2,23 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.24.0] - 2026-10-29
+
+### Diperbaiki & Dioptimalkan (Anti-Putus Suara, Seamless Auto-Reconnect, & Ketahanan Latar Belakang / Layar Mati)
+- **Tahap 1 — *Adaptive Pre-Roll Playout Jitter Buffer, `URGENT_AUDIO` Thread, & Koeksistensi Radio 2.4 GHz* (`Voice`, `Ble`, `MainActivity`)**:
+  - Menambahkan **Adaptive Playout Jitter Buffer (`60 ms` / 3 bingkai *pre-roll*, batas latensi `240 ms`)** dengan thread pemutar khusus berdetak `20 ms` dan sisipan PLC otomatis (`concealFrame`) hingga 2 bingkai (`40 ms`) saat paket terlambat tiba, sehingga `AudioTrack` tidak pernah mengalami *buffer underrun* (suara putus-putus) dan tidak pernah memblokir thread pembaca jaringan.
+  - Menaikkan prioritas thread rekam mikrofon dan pemutar suara ke `Process.THREAD_PRIORITY_URGENT_AUDIO`.
+  - Menambahkan **2.4 GHz Voice-Active Coexistence Throttling** (`Ble.setVoiceActive`) dengan penjaga anti-throttle (`MIN_SCAN_RESTART_MS = 8000 ms`) yang menurunkan *BLE Scan* ke `SCAN_MODE_LOW_POWER` selama sesi bicara/telepon aktif agar >98% waktu antena 2.4 GHz diberikan ke paket suara.
+- **Tahap 2 — *25s Link Resilience, Dedicated Heartbeat Flush, & Seamless In-Session TCP Auto-Reconnect* (`Link`, `Hub`, `MainActivity`)**:
+  - Menaikkan batas *read timeout* `Link.TIMEOUT_MS` dari `10 detik` menjadi **`25 detik`**, mengaktifkan `socket.setKeepAlive(true)`, serta menyisipkan `Frame.PING` + `out.flush()` terjadwal setiap `3 detik` bahkan di tengah pengiriman media `bulk` (foto/video) agar koneksi tidak pernah terputus akibat *head-of-line blocking*.
+  - Menambahkan **In-Session Background TCP Auto-Reconnect** di `Hub` (`scheduleAutoReconnect`: `450 ms → 1,2 s → 2,5 s → 4,5 s`) dan pemulihan transien pra-`HELLO` Wi‑Fi Direct di `MainActivity.onRejected()` sehingga koneksi yang terputus sesaat otomatis menyambung kembali tanpa membubarkan grup atau mematikan Mode Telepon.
+- **Tahap 3 — *Ketahanan Latar Belakang & Layar Mati di Android 8–15* (`Ble`, `KeepAliveService`, `AndroidManifest.xml`, `MainActivity`)**:
+  - Memasang **`ScanFilter` perangkat keras eksplisit** (`Ble.buildScanFilters`: `0xFD91` Beacon, `0xFD92` 15-Hop Mesh, dan `0xFE12` MeshAccess) pada `BluetoothLeScanner.startScan()` sehingga sistem operasi Android 8.1+ tidak pernah mematikan pemindaian BLE saat layar HP dimatikan di saku.
+  - Memperbarui `KeepAliveService` untuk menggunakan `startForegroundService()` pada Android 8.0+, `START_STICKY`, **`WIFI_MODE_FULL_LOW_LATENCY` (`4`)** pada Android 10+ (mencegah *DTIM power-save sleep* pada panggilan suara saat layar mati), serta mengakuisisi `WifiManager.MulticastLock` agar paket UDP LAN tetap diterima saat layar terkunci.
+  - Menjaga `KeepAliveService` aktif selama mode siaga lapangan maupun di dalam grup, serta menambahkan izin & menu profil sekali ketuk **"Baterai latar belakang: Izinkan tanpa batas"** (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`).
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan pengujian unit `voiceJitterBufferLinkAutoReconnectAndScreenOffSurvival` yang memverifikasi *jitter buffer* + PLC, koeksistensi radio, `ScanFilter` layar mati, `KeepAliveService`, dan *live TCP auto-reconnect* secara *end-to-end*.
+
 ## [0.23.0] - 2026-10-28
 
 ### Ditambahkan & Dioptimalkan (Sinergi Panggilan Suara & Push-to-Talk Multi-Hop Kilometer: ProSe Wi‑Fi Aware L2 Sidelink + 3GPP Rel-13 Relay + 15-Hop Mesh + MeshSat HeMB/SMAZ2)

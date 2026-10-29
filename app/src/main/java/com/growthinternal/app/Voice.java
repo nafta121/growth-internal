@@ -7,7 +7,10 @@ import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.media.audiofx.AcousticEchoCanceler;
 import android.media.audiofx.NoiseSuppressor;
+import android.os.Process;
+import android.os.SystemClock;
 
+import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -18,10 +21,169 @@ final class Voice {
 
     static final int RATE = 16000;
     static final int FRAME_BYTES = 640; // 20 ms
+    static final int FRAME_MS = 20;
+    static final int PRE_ROLL_FRAMES = 3;   // 60 ms pre-roll absorbs Wi-Fi/BLE jitter
+    static final int MAX_JITTER_FRAMES = 12; // 240 ms latency cap
+    static final int MAX_PLC_FRAMES = 2;    // up to 40 ms zero-underrun concealment
+    private static final long SHORT_SPURT_WAIT_MS = 45L;
+    private static final long IDLE_RELEASE_MS = 3000L;
 
-    private final Map<String, AudioTrack> tracks = new ConcurrentHashMap<String, AudioTrack>();
-    private final Map<String, byte[]> lastFrames = new ConcurrentHashMap<String, byte[]>();
-    private final Map<String, Long> lastTimes = new ConcurrentHashMap<String, Long>();
+    /**
+     * Adaptive pre-roll jitter buffer with bounded latency and automatic Packet Loss Concealment.
+     * Buffers PRE_ROLL_FRAMES (60 ms) before starting a talk spurt so wireless packet arrival
+     * jitter never starves AudioTrack, and synthesizes up to MAX_PLC_FRAMES (40 ms) when late.
+     */
+    static final class JitterBuffer {
+        private final ArrayDeque<byte[]> queue = new ArrayDeque<byte[]>(MAX_JITTER_FRAMES);
+        private boolean primed;
+        private long firstBufferedMs;
+        private byte[] lastGoodFrame;
+        private int plcCount;
+
+        synchronized void offer(byte[] pcm, long nowMs) {
+            if (pcm == null || pcm.length == 0) return;
+            while (queue.size() >= MAX_JITTER_FRAMES) {
+                queue.pollFirst();
+            }
+            if (queue.isEmpty() && !primed) {
+                firstBufferedMs = nowMs;
+            }
+            queue.addLast(pcm);
+            if (queue.size() >= PRE_ROLL_FRAMES) {
+                primed = true;
+            }
+            notifyAll();
+        }
+
+        synchronized byte[] pollNext(long nowMs) {
+            if (!primed) {
+                if (queue.isEmpty()) return null;
+                if (queue.size() >= PRE_ROLL_FRAMES
+                        || (nowMs - firstBufferedMs) >= SHORT_SPURT_WAIT_MS) {
+                    primed = true;
+                } else {
+                    return null;
+                }
+            }
+            byte[] next = queue.pollFirst();
+            if (next != null) {
+                lastGoodFrame = next;
+                plcCount = 0;
+                return next;
+            }
+            if (lastGoodFrame != null && lastGoodFrame.length == FRAME_BYTES
+                    && plcCount < MAX_PLC_FRAMES) {
+                plcCount++;
+                byte[] plc = concealFrame(lastGoodFrame);
+                lastGoodFrame = plc;
+                return plc;
+            }
+            primed = false;
+            plcCount = 0;
+            return null;
+        }
+
+        synchronized int size() { return queue.size(); }
+
+        synchronized boolean isPrimed() { return primed; }
+    }
+
+    private final class PlayoutWorker implements Runnable {
+        final String sender;
+        final AudioTrack track;
+        final JitterBuffer jitter = new JitterBuffer();
+        final AtomicBoolean running = new AtomicBoolean(true);
+        private boolean trackReleased;
+
+        PlayoutWorker(String sender, AudioTrack track) {
+            this.sender = sender;
+            this.track = track;
+        }
+
+        @Override public void run() {
+            try {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
+            } catch (RuntimeException ignored) {
+            }
+            long nextTick = SystemClock.elapsedRealtime();
+            long idleSince = nextTick;
+            while (running.get()) {
+                long now = SystemClock.elapsedRealtime();
+                byte[] frame = jitter.pollNext(now);
+                if (frame != null) {
+                    if (!writeTrack(frame)) {
+                        break;
+                    }
+                    idleSince = SystemClock.elapsedRealtime();
+                    nextTick += FRAME_MS;
+                    long sleepMs = nextTick - idleSince;
+                    if (sleepMs < -60L) {
+                        nextTick = idleSince;
+                    } else if (sleepMs > 0L) {
+                        try {
+                            Thread.sleep(sleepMs);
+                        } catch (InterruptedException e) {
+                            break;
+                        }
+                    }
+                } else {
+                    if (now - idleSince >= IDLE_RELEASE_MS) {
+                        break;
+                    }
+                    synchronized (jitter) {
+                        if (running.get() && jitter.size() == 0) {
+                            try {
+                                jitter.wait(15L);
+                            } catch (InterruptedException e) {
+                                break;
+                            }
+                        }
+                    }
+                    nextTick = SystemClock.elapsedRealtime();
+                }
+            }
+            closeSelf();
+        }
+
+        void stop() {
+            if (running.compareAndSet(true, false)) {
+                synchronized (jitter) {
+                    jitter.notifyAll();
+                }
+            }
+            releaseTrack();
+        }
+
+        private void closeSelf() {
+            running.set(false);
+            workers.remove(sender, this);
+            releaseTrack();
+        }
+
+        private boolean writeTrack(byte[] frame) {
+            synchronized (this) {
+                if (trackReleased || !running.get()) return false;
+                try {
+                    track.write(frame, 0, frame.length);
+                    return true;
+                } catch (RuntimeException e) {
+                    return false;
+                }
+            }
+        }
+
+        private void releaseTrack() {
+            synchronized (this) {
+                if (trackReleased) return;
+                trackReleased = true;
+                try { track.stop(); } catch (RuntimeException ignored) { }
+                try { track.release(); } catch (RuntimeException ignored) { }
+            }
+        }
+    }
+
+    private final ConcurrentHashMap<String, PlayoutWorker> workers =
+            new ConcurrentHashMap<String, PlayoutWorker>();
     private volatile boolean capturing;
     private AtomicBoolean activeCapture;
     private Thread captureThread;
@@ -71,6 +233,10 @@ final class Voice {
         capturing = true;
         captureThread = new Thread(new Runnable() {
             @Override public void run() {
+                try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
+                } catch (RuntimeException ignored) {
+                }
                 rec.startRecording();
                 byte[] buf = new byte[FRAME_BYTES];
                 while (sessionActive.get()) {
@@ -101,62 +267,45 @@ final class Voice {
         }
     }
 
-    /** Called from network threads; each sender gets its own track. */
+    /** Enqueues incoming PCM onto the sender's non-blocking jitter buffer playout worker. */
     void play(String from, byte[] pcm) {
-        AudioTrack t = tracks.get(from);
-        if (t == null) {
+        if (from == null || pcm == null || pcm.length == 0) return;
+        PlayoutWorker w = workers.get(from);
+        if (w == null || !w.running.get()) {
             synchronized (this) {
-                t = tracks.get(from);
-                if (t == null) {
+                w = workers.get(from);
+                if (w == null || !w.running.get()) {
                     int min = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_MONO,
                             AudioFormat.ENCODING_PCM_16BIT);
-                    t = new AudioTrack(AudioManager.STREAM_VOICE_CALL, RATE, AudioFormat.CHANNEL_OUT_MONO,
-                            AudioFormat.ENCODING_PCM_16BIT, Math.max(min, FRAME_BYTES * 10),
-                            AudioTrack.MODE_STREAM);
+                    AudioTrack t = new AudioTrack(AudioManager.STREAM_VOICE_CALL, RATE,
+                            AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                            Math.max(min, FRAME_BYTES * 12), AudioTrack.MODE_STREAM);
                     if (t.getState() != AudioTrack.STATE_INITIALIZED) {
                         t.release();
                         return;
                     }
                     t.play();
-                    tracks.put(from, t);
+                    w = new PlayoutWorker(from, t);
+                    workers.put(from, w);
+                    Thread pt = new Thread(w, "voice-play-" + from);
+                    pt.setDaemon(true);
+                    pt.start();
                 }
             }
         }
-        long now = System.currentTimeMillis();
-        Long prevMs = lastTimes.put(from, now);
-        byte[] prev = lastFrames.put(from, pcm);
-        try {
-            if (prevMs != null && prev != null && prev.length == FRAME_BYTES) {
-                long gap = now - prevMs;
-                if (gap >= 35L && gap <= 95L) {
-                    byte[] plc = concealFrame(prev);
-                    t.write(plc, 0, plc.length);
-                }
-            }
-            t.write(pcm, 0, pcm.length);
-        } catch (IllegalStateException ignored) {
-            // Track was released while this frame was in flight.
-        }
+        w.jitter.offer(pcm, SystemClock.elapsedRealtime());
     }
 
     synchronized void drop(String from) {
-        lastFrames.remove(from);
-        lastTimes.remove(from);
-        AudioTrack t = tracks.remove(from);
-        if (t != null) {
-            try { t.stop(); } catch (IllegalStateException ignored) { }
-            t.release();
-        }
+        PlayoutWorker w = workers.remove(from);
+        if (w != null) w.stop();
     }
 
     synchronized void release() {
         stopCapture();
-        lastFrames.clear();
-        lastTimes.clear();
-        for (AudioTrack t : tracks.values()) {
-            try { t.stop(); } catch (IllegalStateException ignored) { }
-            t.release();
+        for (PlayoutWorker w : workers.values()) {
+            w.stop();
         }
-        tracks.clear();
+        workers.clear();
     }
 }
