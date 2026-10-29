@@ -220,8 +220,8 @@ final class Voice {
     private Thread captureThread;
 
     /**
-     * MeshLive-inspired Packet Loss Concealment (PLC): generates a cross-faded, gently attenuated
-     * continuation frame (85% -> 55%) from the last good 16-bit PCM frame without DC boundary clicks.
+     * MeshLive-inspired Packet Loss Concealment (PLC): generates a cross-faded, attenuated
+     * continuation frame (fading 75% -> 25%) from the last good 16-bit PCM frame without boundary clicks.
      */
     static byte[] concealFrame(byte[] prevPcm) {
         if (prevPcm == null || (prevPcm.length & 1) != 0 || prevPcm.length == 0) return new byte[0];
@@ -238,7 +238,7 @@ final class Voice {
             if (i < blendLen) {
                 s = ((lastSample * (blendLen - i)) + (s * i)) / blendLen;
             }
-            int attenuated = (s * (17 * samples - 6 * i)) / (20 * samples);
+            int attenuated = (s * (3 * samples - 2 * i)) / (4 * samples);
             out[i * 2] = (byte) (attenuated & 0xFF);
             out[i * 2 + 1] = (byte) ((attenuated >> 8) & 0xFF);
         }

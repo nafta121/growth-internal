@@ -1162,7 +1162,7 @@ public class AdpcmTest {
         sb.putShort((short) 10000);
         byte[] concealed = Voice.concealFrame(stepFrame);
         short firstConcealed = ByteBuffer.wrap(concealed).order(ByteOrder.LITTLE_ENDIAN).getShort(0);
-        assertTrue("PLC frame must crossfade smoothly from lastSample (+8500) instead of jumping to -7500",
+        assertTrue("PLC frame must crossfade smoothly from lastSample (+7500) instead of jumping to -7500",
                 firstConcealed > 7000);
 
         // 2. MeshAccess MTU 247 fits narrowband ADPCM + Frame header in 1 single GATT write (vs 8-13 writes at MTU 20)
