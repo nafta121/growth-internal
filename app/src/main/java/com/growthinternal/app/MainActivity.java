@@ -134,7 +134,8 @@ public class MainActivity extends Activity implements Hub.Callback {
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
     private final Set<String> talkers = new LinkedHashSet<String>();
     private final List<WifiP2pDevice> peers = new ArrayList<WifiP2pDevice>();
-    private final Map<String, Aware.Peer> awarePeers = new LinkedHashMap<String, Aware.Peer>();
+    private final Map<String, Aware.Peer> awarePeers =
+            new java.util.concurrent.ConcurrentHashMap<String, Aware.Peer>();
     private final Map<String, Lan.Peer> lanPeers = new LinkedHashMap<String, Lan.Peer>();
     private final Map<String, android.bluetooth.BluetoothDevice> btPeers =
             new LinkedHashMap<String, android.bluetooth.BluetoothDevice>();
@@ -261,10 +262,13 @@ public class MainActivity extends Activity implements Hub.Callback {
         }).onSidelink(new Aware.SidelinkListener() {
             @Override public void onSidelink(final Aware.SidelinkPacket packet) {
                 if (packet != null && packet.type == Aware.SIDELINK_AUDIO) {
-                    if (!packet.sender.equals(myName)) {
-                        byte[] pcm = Adpcm.decode(packet.body);
-                        if (pcm.length > 0) voice.play(packet.sender, pcm);
-                        if (hub != null && hub.hasPeers()) hub.relayMeshAudio(packet.sender, packet.body);
+                    if (!packet.sender.equals(myName) && !Hub.isPassiveRelayName(packet.sender)) {
+                        Hub h = hub;
+                        if (h == null || !h.hasMember(packet.sender)) {
+                            byte[] pcm = Adpcm.decode(packet.body);
+                            if (pcm.length > 0) voice.play(packet.sender, pcm);
+                            if (h != null && h.hasPeers()) h.relayMeshAudio(packet.sender, packet.body);
+                        }
                     }
                     return;
                 }
@@ -2689,8 +2693,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onAwareSidelink(Aware.SidelinkPacket pkt) {
-        if (pkt == null || pkt.sender.equals(myName)) return;
+        if (pkt == null || pkt.sender.equals(myName) || Hub.isPassiveRelayName(pkt.sender)) return;
         if (pkt.type == Aware.SIDELINK_TALK) {
+            if (hub != null && hub.hasMember(pkt.sender)) return;
             boolean talking = pkt.body != null && pkt.body.length > 0 && pkt.body[0] != 0;
             updateMeshPeerState(pkt.sender, presences.get(pkt.sender), true);
             if (hub != null && hub.hasPeers()) hub.relayMeshTalkState(pkt.sender, talking);
@@ -2758,7 +2763,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void updateMeshPeerState(String peerName, Presence p, boolean inRange) {
-        if (peerName == null || peerName.equals(myName)) return;
+        if (peerName == null || peerName.equals(myName) || Hub.isPassiveRelayName(peerName)) return;
         if (inRange && !coordinator.isPaused()) {
             ensureActiveHub();
             boolean isNew = !members.containsKey(peerName);
@@ -3222,6 +3227,15 @@ public class MainActivity extends Activity implements Hub.Callback {
         input.setText("");
     }
 
+    private boolean shouldBroadcastSidelinkVoice(Hub h) {
+        if (aware == null) return false;
+        if (h == null || !h.hasPeers()) return true;
+        for (String peerName : awarePeers.keySet()) {
+            if (!h.hasMember(peerName)) return true;
+        }
+        return false;
+    }
+
     private void startTalking() {
         if (!ready()) return;
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -3234,7 +3248,9 @@ public class MainActivity extends Activity implements Hub.Callback {
             voice.startCapture(new Voice.Sink() {
                 @Override public void onPcm(byte[] pcm) {
                     h.sendAudio(pcm);
-                    if (aware != null) aware.broadcastSidelinkAudio(myName, pcm);
+                    if (shouldBroadcastSidelinkVoice(h)) {
+                        aware.broadcastSidelinkAudio(myName, pcm);
+                    }
                 }
             });
         } catch (RuntimeException e) {
@@ -3242,7 +3258,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             return;
         }
         h.sendTalkState(true);
-        if (aware != null) aware.broadcastSidelinkTalk(myName, true);
+        if (shouldBroadcastSidelinkVoice(h)) aware.broadcastSidelinkTalk(myName, true);
         syncVoiceCoexistence();
         refreshControls();
     }
@@ -3289,6 +3305,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     @Override public void onMemberJoined(final String name, final byte[] photo) {
+        if (Hub.isPassiveRelayName(name)) return;
         ui.post(new Runnable() {
             @Override public void run() {
                 if (hub == null) return;

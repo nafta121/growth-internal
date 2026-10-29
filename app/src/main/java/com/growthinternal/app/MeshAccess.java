@@ -463,6 +463,10 @@ final class MeshAccess {
             this.mtuPayload = Math.max(DEFAULT_MTU_PAYLOAD, Math.min(512, mtu - 3));
         }
 
+        int mtuPayload() {
+            return mtuPayload;
+        }
+
         void onIncomingPacket(byte[] packet, Runnable onHandshakeComplete) {
             if (closed || packet == null) return;
             if (Session.isDeadDataPacket(packet)) {
@@ -672,6 +676,10 @@ final class MeshAccess {
                     serverPipes.remove(addr);
                     Semaphore g = serverGates.remove(addr);
                     if (g != null && g.availablePermits() == 0) g.release();
+                    BluetoothGattServer srv = gattServer;
+                    if (srv != null) {
+                        try { srv.cancelConnection(device); } catch (RuntimeException ignored) {}
+                    }
                 }
             });
             Integer mtu = deviceMtus.get(addr);
@@ -698,6 +706,7 @@ final class MeshAccess {
         BluetoothGattCallback cb = new BluetoothGattCallback() {
             private BluetoothGattCharacteristic rx;
             private Pipe pipe;
+            private volatile int negotiatedMtu = DEFAULT_MTU_PAYLOAD + 3;
 
             @Override public void onConnectionStateChange(final BluetoothGatt gatt, int status, int newState) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -727,8 +736,11 @@ final class MeshAccess {
             }
 
             @Override public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
-                if (pipe != null && status == BluetoothGatt.GATT_SUCCESS) {
-                    pipe.setMtuPayload(mtu);
+                if (status == BluetoothGatt.GATT_SUCCESS && mtu > DEFAULT_MTU_PAYLOAD + 3) {
+                    negotiatedMtu = mtu;
+                    if (pipe != null) {
+                        pipe.setMtuPayload(mtu);
+                    }
                 }
                 try {
                     gatt.discoverServices();
@@ -783,6 +795,7 @@ final class MeshAccess {
                             try { gatt.close(); } catch (RuntimeException ignored) {}
                         }
                     });
+                    pipe.setMtuPayload(negotiatedMtu);
                     createdPipe[0] = pipe;
                     gatt.setCharacteristicNotification(tx, true);
                     BluetoothGattDescriptor cccd = tx.getDescriptor(CCCD_UUID);

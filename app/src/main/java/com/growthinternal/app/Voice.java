@@ -25,7 +25,9 @@ final class Voice {
     static final int PRE_ROLL_FRAMES = 3;   // 60 ms pre-roll absorbs Wi-Fi/BLE jitter
     static final int MAX_JITTER_FRAMES = 12; // 240 ms latency cap
     static final int MAX_PLC_FRAMES = 2;    // up to 40 ms zero-underrun concealment
-    private static final long SHORT_SPURT_WAIT_MS = 45L;
+    private static final long SHORT_SPURT_WAIT_MS = 120L;
+    private static final long MAX_HW_CUSHION_MS = 140L;
+    private static final long PLC_TRIGGER_CUSHION_MS = 12L;
     private static final long IDLE_RELEASE_MS = 3000L;
 
     /**
@@ -55,7 +57,7 @@ final class Voice {
             notifyAll();
         }
 
-        synchronized byte[] pollNext(long nowMs) {
+        synchronized byte[] pollQueued(long nowMs) {
             if (!primed) {
                 if (queue.isEmpty()) return null;
                 if (queue.size() >= PRE_ROLL_FRAMES
@@ -69,8 +71,14 @@ final class Voice {
             if (next != null) {
                 lastGoodFrame = next;
                 plcCount = 0;
-                return next;
             }
+            return next;
+        }
+
+        synchronized byte[] pollNext(long nowMs) {
+            byte[] next = pollQueued(nowMs);
+            if (next != null) return next;
+            if (!primed) return null;
             if (lastGoodFrame != null && lastGoodFrame.length == FRAME_BYTES
                     && plcCount < MAX_PLC_FRAMES) {
                 plcCount++;
@@ -105,41 +113,64 @@ final class Voice {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
             } catch (RuntimeException ignored) {
             }
-            long nextTick = SystemClock.elapsedRealtime();
-            long idleSince = nextTick;
+            final byte[] leadInSilence = new byte[FRAME_BYTES];
+            long playoutEndMs = 0L;
+            long idleSince = SystemClock.elapsedRealtime();
             while (running.get()) {
                 long now = SystemClock.elapsedRealtime();
-                byte[] frame = jitter.pollNext(now);
+                long cushionMs = playoutEndMs - now;
+                byte[] frame = cushionMs < MAX_HW_CUSHION_MS ? jitter.pollQueued(now) : null;
                 if (frame != null) {
+                    if (cushionMs <= 0L) {
+                        // Cross AudioFlinger's half-buffer start threshold immediately on spurt start
+                        if (!writeTrack(leadInSilence)) break;
+                        now = SystemClock.elapsedRealtime();
+                        playoutEndMs = now + FRAME_MS;
+                    }
                     if (!writeTrack(frame)) {
                         break;
                     }
-                    idleSince = SystemClock.elapsedRealtime();
-                    nextTick += FRAME_MS;
-                    long sleepMs = nextTick - idleSince;
-                    if (sleepMs < -60L) {
-                        nextTick = idleSince;
-                    } else if (sleepMs > 0L) {
+                    long after = SystemClock.elapsedRealtime();
+                    playoutEndMs = Math.max(after, playoutEndMs) + FRAME_MS;
+                    idleSince = after;
+                    continue;
+                }
+                if (jitter.isPrimed()) {
+                    if (cushionMs <= PLC_TRIGGER_CUSHION_MS) {
+                        byte[] plc = jitter.pollNext(now);
+                        if (plc != null) {
+                            if (!writeTrack(plc)) break;
+                            long after = SystemClock.elapsedRealtime();
+                            playoutEndMs = Math.max(after, playoutEndMs) + FRAME_MS;
+                            idleSince = after;
+                            continue;
+                        }
+                    } else {
+                        long waitMs = Math.min(20L, Math.max(2L, cushionMs - PLC_TRIGGER_CUSHION_MS));
+                        synchronized (jitter) {
+                            if (running.get() && (jitter.size() == 0
+                                    || (playoutEndMs - SystemClock.elapsedRealtime()) >= MAX_HW_CUSHION_MS)) {
+                                try {
+                                    jitter.wait(waitMs);
+                                } catch (InterruptedException e) {
+                                    break;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                }
+                if (now - idleSince >= IDLE_RELEASE_MS) {
+                    break;
+                }
+                synchronized (jitter) {
+                    if (running.get() && jitter.size() == 0) {
                         try {
-                            Thread.sleep(sleepMs);
+                            jitter.wait(20L);
                         } catch (InterruptedException e) {
                             break;
                         }
                     }
-                } else {
-                    if (now - idleSince >= IDLE_RELEASE_MS) {
-                        break;
-                    }
-                    synchronized (jitter) {
-                        if (running.get() && jitter.size() == 0) {
-                            try {
-                                jitter.wait(15L);
-                            } catch (InterruptedException e) {
-                                break;
-                            }
-                        }
-                    }
-                    nextTick = SystemClock.elapsedRealtime();
                 }
             }
             closeSelf();
@@ -189,18 +220,25 @@ final class Voice {
     private Thread captureThread;
 
     /**
-     * MeshLive-inspired Packet Loss Concealment (PLC): generates an attenuated continuation
-     * frame (fading 75% -> 25%) from the last good 16-bit PCM frame when a brief gap occurs.
+     * MeshLive-inspired Packet Loss Concealment (PLC): generates a cross-faded, gently attenuated
+     * continuation frame (85% -> 55%) from the last good 16-bit PCM frame without DC boundary clicks.
      */
     static byte[] concealFrame(byte[] prevPcm) {
         if (prevPcm == null || (prevPcm.length & 1) != 0 || prevPcm.length == 0) return new byte[0];
         int samples = prevPcm.length / 2;
         byte[] out = new byte[prevPcm.length];
+        int lastLo = prevPcm[(samples - 1) * 2] & 0xFF;
+        int lastHi = prevPcm[(samples - 1) * 2 + 1];
+        int lastSample = (short) ((lastHi << 8) | lastLo);
+        int blendLen = Math.min(16, samples);
         for (int i = 0; i < samples; i++) {
             int lo = prevPcm[i * 2] & 0xFF;
             int hi = prevPcm[i * 2 + 1];
-            short s = (short) ((hi << 8) | lo);
-            int attenuated = (s * (3 * samples - 2 * i)) / (4 * samples);
+            int s = (short) ((hi << 8) | lo);
+            if (i < blendLen) {
+                s = ((lastSample * (blendLen - i)) + (s * i)) / blendLen;
+            }
+            int attenuated = (s * (17 * samples - 6 * i)) / (20 * samples);
             out[i * 2] = (byte) (attenuated & 0xFF);
             out[i * 2 + 1] = (byte) ((attenuated >> 8) & 0xFF);
         }
@@ -279,7 +317,7 @@ final class Voice {
                             AudioFormat.ENCODING_PCM_16BIT);
                     AudioTrack t = new AudioTrack(AudioManager.STREAM_VOICE_CALL, RATE,
                             AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                            Math.max(min, FRAME_BYTES * 12), AudioTrack.MODE_STREAM);
+                            Math.max(min, FRAME_BYTES * 8), AudioTrack.MODE_STREAM);
                     if (t.getState() != AudioTrack.STATE_INITIALIZED) {
                         t.release();
                         return;

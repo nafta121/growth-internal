@@ -1127,6 +1127,153 @@ public class AdpcmTest {
         ownerHub.stop();
     }
 
+    @Test public void closeRangeSmoothVoiceNoRelayDuplicateAndHembWindowSync() throws Exception {
+        // 1. Hardware-cushioned JitterBuffer.pollQueued: absorbs 45ms late packet without premature PLC chop
+        Voice.JitterBuffer jb = new Voice.JitterBuffer();
+        byte[] p0 = new byte[Voice.FRAME_BYTES];
+        byte[] p1 = new byte[Voice.FRAME_BYTES];
+        byte[] p2 = new byte[Voice.FRAME_BYTES];
+        byte[] p3 = new byte[Voice.FRAME_BYTES];
+        p0[0] = 11;
+        p1[0] = 22;
+        p2[0] = 33;
+        p3[0] = 44;
+
+        jb.offer(p0, 1000L);
+        assertNull("Single frame at +50ms must not under-prime spurt", jb.pollQueued(1050L));
+        assertFalse(jb.isPrimed());
+        jb.offer(p1, 1055L);
+        jb.offer(p2, 1060L);
+        assertTrue(jb.isPrimed());
+        assertArrayEquals(p0, jb.pollQueued(1060L));
+        assertArrayEquals(p1, jb.pollQueued(1060L));
+        assertArrayEquals(p2, jb.pollQueued(1060L));
+        // Momentarily empty queue while AudioTrack hardware cushion plays: pollQueued returns null, stays primed!
+        assertNull(jb.pollQueued(1085L));
+        assertTrue("JitterBuffer must stay primed while AudioTrack hardware cushion plays", jb.isPrimed());
+        // Late packet p3 arrives 45ms later and plays bit-exact without any synthetic PLC frame wedged in!
+        jb.offer(p3, 1105L);
+        assertArrayEquals(p3, jb.pollQueued(1105L));
+
+        // Cross-faded concealFrame avoids abrupt DC step click between end sample (+10000) and start sample (-10000)
+        byte[] stepFrame = new byte[Voice.FRAME_BYTES];
+        ByteBuffer sb = ByteBuffer.wrap(stepFrame).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < 319; i++) sb.putShort((short) -10000);
+        sb.putShort((short) 10000);
+        byte[] concealed = Voice.concealFrame(stepFrame);
+        short firstConcealed = ByteBuffer.wrap(concealed).order(ByteOrder.LITTLE_ENDIAN).getShort(0);
+        assertTrue("PLC frame must crossfade smoothly from lastSample (+8500) instead of jumping to -7500",
+                firstConcealed > 7000);
+
+        // 2. MeshAccess MTU 247 fits narrowband ADPCM + Frame header in 1 single GATT write (vs 8-13 writes at MTU 20)
+        MeshAccess.Pipe[] mtuPipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        mtuPipes[0].setMtuPayload(247);
+        assertEquals(244, mtuPipes[0].mtuPayload());
+        byte[][] singleGattWrite = MeshAccess.Session.splitPayload(new byte[100], mtuPipes[0].mtuPayload());
+        assertEquals("84B narrowband voice + Frame header must fit in 1 GATT packet at MTU 247",
+                1, singleGattWrite.length);
+        mtuPipes[0].close();
+        mtuPipes[1].close();
+
+        // 3. #relay passive node must NEVER appear as a duplicate user, and upgrades cleanly to active <Name>
+        assertTrue(Hub.isPassiveRelayName("Budi#relay"));
+        assertFalse(Hub.isPassiveRelayName("Budi"));
+        assertEquals("Budi", Hub.baseMemberName("Budi#relay"));
+
+        HubTest.Rec rAndi = new HubTest.Rec();
+        HubTest.Rec rBudi = new HubTest.Rec();
+        HubTest.Rec rCici = new HubTest.Rec();
+        Hub hubAndi = new Hub("Andi", null, rAndi).asOwner(true);
+        Hub budiRelay = new Hub("Budi#relay", null, Hub.NOOP_CALLBACK).asOwner(true);
+
+        MeshAccess.Pipe[] relayPipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_ZERO);
+        hubAndi.addStreamLink(relayPipes[0].in, relayPipes[0].out, relayPipes[0], true);
+        budiRelay.addStreamLink(relayPipes[1].in, relayPipes[1].out, relayPipes[1], true);
+        Thread.sleep(200);
+        assertFalse("Passive #relay node must never be listed in Hub.members",
+                hubAndi.hasMember("Budi#relay"));
+        assertFalse("Passive #relay node must never fire onMemberJoined",
+                rAndi.log.contains("join:Budi#relay"));
+
+        // Now Budi joins actively as "Budi": seamlessly replaces "Budi#relay" link with only 1 user "Budi"
+        Hub hubBudi = new Hub("Budi", null, rBudi).asOwner(false);
+        MeshAccess.Pipe[] activePipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubAndi.addStreamLink(activePipes[0].in, activePipes[0].out, activePipes[0], true);
+        hubBudi.addStreamLink(activePipes[1].in, activePipes[1].out, activePipes[1], true);
+        HubTest.waitFor(rAndi, "join:Budi");
+        HubTest.waitFor(rBudi, "join:Andi");
+        assertTrue(hubAndi.hasMember("Budi"));
+        assertFalse(hubAndi.hasMember("Budi#relay"));
+
+        // Late redundant "Budi#relay" tunnel while "Budi" is already connected must be rejected immediately
+        Hub lateRelay = new Hub("Budi#relay", null, Hub.NOOP_CALLBACK).asOwner(true);
+        MeshAccess.Pipe[] dupRelayPipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_ZERO);
+        hubAndi.addStreamLink(dupRelayPipes[0].in, dupRelayPipes[0].out, dupRelayPipes[0], true);
+        lateRelay.addStreamLink(dupRelayPipes[1].in, dupRelayPipes[1].out, dupRelayPipes[1], true);
+        Thread.sleep(150);
+        assertEquals("Redundant #relay link must be closed so only 1 link to Budi remains",
+                1, hubAndi.activeLinks().size());
+        assertFalse(rAndi.log.contains("join:Budi#relay"));
+
+        // Self-relay loop ("Budi#relay" connecting into client hubBudi "Budi") must close silently without onRejected
+        MeshAccess.Pipe[] selfLoopPipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_ZERO);
+        hubBudi.addStreamLink(selfLoopPipes[0].in, selfLoopPipes[0].out, selfLoopPipes[0], true);
+        lateRelay.addStreamLink(selfLoopPipes[1].in, selfLoopPipes[1].out, selfLoopPipes[1], true);
+        Thread.sleep(150);
+        assertEquals("Self-relay loop must be discarded without dropping active link",
+                1, hubBudi.activeLinks().size());
+
+        // 4. Duplicate Sidelink/MeshRelay voice suppression when sender is already a Hub member
+        Hub hubCici = new Hub("Cici", null, rCici).asOwner(false);
+        MeshAccess.Pipe[] ciciPipes = createPairedMeshAccessPipes(MeshAccess.FM_KEY_NETWORK);
+        hubAndi.addStreamLink(ciciPipes[0].in, ciciPipes[0].out, ciciPipes[0], true);
+        hubCici.addStreamLink(ciciPipes[1].in, ciciPipes[1].out, ciciPipes[1], true);
+        HubTest.waitFor(rCici, "join:Budi");
+
+        rAndi.log.clear();
+        byte[] nbVoice = Adpcm.encodeNarrowband(new byte[Voice.FRAME_BYTES]);
+        // Cici relays sidelink audio claiming originSender="Budi" (already in hubAndi!) -> must NOT double-play!
+        hubCici.relayMeshAudio("Budi", nbVoice);
+        // Cici relays sidelink audio for external pure-Sidelink node "Pos Luar" -> MUST play!
+        hubCici.relayMeshAudio("Pos Luar", nbVoice);
+        HubTest.waitFor(rAndi, "audio:Pos Luar:640");
+        assertFalse("Relayed sidelink audio for already-connected Hub member Budi must be suppressed",
+                rAndi.log.contains("audio:Budi:640"));
+
+        // 5. HeMB window desync protection when an earlier AUDIO_HEMB parity packet was dropped
+        rAndi.log.clear();
+        byte[][] w0 = new byte[4][];
+        byte[][] w1 = new byte[4][];
+        for (int k = 0; k < 4; k++) {
+            byte[] raw = new byte[Voice.FRAME_BYTES];
+            raw[0] = (byte) (k + 10);
+            w0[k] = Adpcm.encodeNarrowband(raw);
+            raw[0] = (byte) (k + 90);
+            w1[k] = Adpcm.encodeNarrowband(raw);
+        }
+        // Window 0 loses frame #3 AND loses its AUDIO_HEMB parity frame (3 frames delivered)
+        hubAndi.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Budi", w0[0]));
+        hubAndi.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Budi", w0[1]));
+        hubAndi.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Budi", w0[2]));
+        // Window 1 delivers all 4 frames + its AUDIO_HEMB parity frame
+        for (int k = 0; k < 4; k++) {
+            hubAndi.onFrame(null, new Frame(Frame.AUDIO_ADPCM, "Budi", w1[k]));
+        }
+        hubAndi.onFrame(null, new Frame(Frame.AUDIO_HEMB, "Budi", Adpcm.encodeHembParity(4, w1)));
+        int budiPlayed = 0;
+        for (String ev : rAndi.log) {
+            if ("audio:Budi:640".equals(ev)) budiPlayed++;
+        }
+        assertEquals("Dropped earlier parity must not trigger false stale-frame replay in next window",
+                7, budiPlayed);
+
+        lateRelay.stop();
+        budiRelay.stop();
+        hubCici.stop();
+        hubBudi.stop();
+        hubAndi.stop();
+    }
+
     private static MeshAccess.Pipe[] createPairedMeshAccessPipes(int fmKeyId) throws IOException {
         MeshAccess.Session sCentral = new MeshAccess.Session(
                 true, (short) 11, fmKeyId, MeshAccess.TUNNEL_REMOTE_MESH);

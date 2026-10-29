@@ -2,6 +2,23 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.25.0] - 2026-10-29
+
+### Diperbaiki & Dioptimalkan (Perbaikan Audio Patah-Patah Jarak Dekat & Eliminasi Duplikat User `#relay`)
+- **Hardware-Cushioned `AudioTrack` Playout & Cross-Faded PLC (`Voice`)**:
+  - Mengganti detak *software* `Thread.sleep(20ms)` di `PlayoutWorker` dengan pengisian langsung (*burst drain*) ke *ring buffer* perangkat keras `AudioTrack` (`80 ms` bantalan awal = 1 bingkai senyap pembuka + 3 bingkai *pre-roll* untuk langsung melewati ambang *half-buffer* Android `AudioFlinger` tanpa *underrun* berulang), serta hanya memicu PLC (`concealFrame`) saat bantalan perangkat keras benar-benar menyentuh `<= 12 ms`.
+  - Menaikkan `SHORT_SPURT_WAIT_MS` ke `120 ms` agar paket pertama yang mengalami jitter `45–100 ms` tidak memulai pemutaran secara prematur dengan bantalan 0 bingkai di Mode Telepon, serta menambahkan *16-sample crossfade* (`85% → 55%`) pada `concealFrame` agar bebas bunyi klik/patah.
+- **Deduplikasi Jalur Suara Ganda Wi‑Fi Aware L2 Sidelink vs `Hub` (`MainActivity`, `Hub`)**:
+  - Mencegah tabrakan 2 aliran suara paralel (`100 fps` ke dalam pemutar `50 fps`) pada jarak dekat dengan melewati pemutaran/estafet `SIDELINK_AUDIO` & `SIDELINK_TALK` ketika pengirim sudah terhubung sebagai anggota aktif `Hub` (`hub.hasMember(sender)`), serta menghentikan pancaran L2 `broadcastSidelinkAudio` saat seluruh rekan Wi‑Fi Aware di sekitar sudah tersambung di `Hub`.
+- **Perbaikan Bottleneck MTU 20-Byte pada BLE GATT `MeshAccess` & Sinkronisasi Jendela HeMB (`MeshAccess`, `Link`, `Hub`)**:
+  - Menyimpan hasil negosiasi `onMtuChanged(247)` sebelum `onServicesDiscovered` di `MeshAccess.openTunnel()` sehingga paket suara narrowband `84 byte` dikirim utuh dalam **1 paket GATT** (bukan terpecah menjadi 13 paket 14-byte pada MTU default 20 byte), serta menggunakan `Adpcm.encodeNarrowband` secara otomatis pada pipa GATT `MeshAccess.Pipe`.
+  - Memperbaiki penghitung jendela `Frame.AUDIO_HEMB` di `Hub` agar paket paritas yang hilang tidak memicu pemutaran ulang suara lama (`80 ms`) atau desinkronisasi antar-jendela.
+- **Eliminasi Duplikat User `<Nama>#relay` & Pemutusan Bersih Koneksi Relay Pasif (`Hub`, `MainActivity`, `MeshAccess`)**:
+  - Menyembunyikan node estafet buta `<Nama>#relay` (`Hub.isPassiveRelayName`) dari daftar anggota UI & `Hub.members` sambil tetap mempertahankan fungsi *multi-hop blind relay* dan konvergensi `ClusterId`.
+  - Mengganti otomatis link pasif `<Nama>#relay` ketika perangkat yang sama bergabung aktif sebagai `<Nama>`, menolak link `#relay` duplikat/loop diri sendiri, serta memanggil `BluetoothGattServer.cancelConnection()` saat pipa server `MeshAccess` ditutup agar tidak menyisakan koneksi *zombie* 25 detik.
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan `closeRangeSmoothVoiceNoRelayDuplicateAndHembWindowSync` untuk memverifikasi kelima perbaikan di atas secara *end-to-end*.
+
 ## [0.24.0] - 2026-10-29
 
 ### Diperbaiki & Dioptimalkan (Anti-Putus Suara, Seamless Auto-Reconnect, & Ketahanan Latar Belakang / Layar Mati)

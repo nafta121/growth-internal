@@ -86,11 +86,13 @@ final class Link {
         if (closed) return;
         // Drop audio rather than build up delay when the radio link is slow.
         if (f.type == Frame.AUDIO || f.type == Frame.AUDIO_ADPCM || f.type == Frame.AUDIO_HEMB) {
+            boolean gattPipe = raw instanceof MeshAccess.Pipe;
+            if (gattPipe && f.type == Frame.AUDIO_HEMB) return;
             if (!f.priority && queue.size() > MAX_QUEUED_AUDIO) return;
             if (f.priority && vital.size() > MAX_QUEUED_AUDIO) return;
             if (System.currentTimeMillis() - f.createdMs > MAX_AUDIO_AGE_MS) return;
             if ((lowBandwidth || relay) && f.type == Frame.AUDIO && f.payload.length >= 4) {
-                byte[] enc = (lowBandwidth && relay)
+                byte[] enc = (gattPipe || (lowBandwidth && relay))
                         ? Adpcm.encodeNarrowband(f.payload)
                         : Adpcm.encode(f.payload);
                 f = new Frame(Frame.AUDIO_ADPCM, f.sender, enc, f.createdMs, f.priority);

@@ -45,6 +45,17 @@ final class Hub implements Link.Listener {
     static final int MAX_LINKS = 16;
     private static final int MAX_HISTORY = 32;
     static final Charset UTF8 = Charset.forName("UTF-8");
+    static final String RELAY_SUFFIX = "#relay";
+
+    static boolean isPassiveRelayName(String name) {
+        return name != null && name.endsWith(RELAY_SUFFIX) && name.length() > RELAY_SUFFIX.length();
+    }
+
+    static String baseMemberName(String name) {
+        return isPassiveRelayName(name)
+                ? name.substring(0, name.length() - RELAY_SUFFIX.length())
+                : name;
+    }
 
     static final Callback NOOP_CALLBACK = new Callback() {
         @Override public void onStatus(String message) {}
@@ -474,70 +485,101 @@ final class Hub implements Link.Listener {
             }
         }
         if (f.type == Frame.HELLO) {
+            boolean passiveRelayPeer = isPassiveRelayName(f.sender);
+            String senderBase = baseMemberName(f.sender);
+            if (senderBase != null && senderBase.equals(baseMemberName(myName))) {
+                if (from != null && from.peerName == null) {
+                    links.remove(from);
+                    from.close();
+                }
+                return;
+            }
             boolean multiHop = owner || links.size() > 1;
             boolean directJoin;
+            Link redundantLinkToClose = null;
             // The first HELLO on a link names the phone at the other end; a client or relay
             // later receives relayed HELLOs of the other members over the same link.
             synchronized (members) {
-                directJoin = (from.peerName == null);
-                if (directJoin) {
-                    Link handoverOld = findHandoverLink(from, f.sender);
-                    if (handoverOld != null) {
-                        links.remove(handoverOld);
-                        from.behind.addAll(handoverOld.behind);
-                        handoverOld.peerName = null;
-                        handoverOld.behind.clear();
-                        from.replacedLink = handoverOld;
-                    } else if (multiHop && nameTaken(f.sender)) {
-                        if (from == uplink) {
-                            cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
-                            from.close();
-                        } else {
-                            from.send(new Frame(Frame.REJECT, myName,
-                                    ("Nama \"" + f.sender + "\" sudah dipakai di grup ini. Ganti nama lalu sambung lagi.")
-                                            .getBytes(UTF8)));
-                        }
-                        return;
-                    }
-                    from.peerName = f.sender;
-                    from.peerPhoto = f.payload;
-                    from.behind.add(f.sender);
-                    if (links.size() > 1 || !members.isEmpty()) {
-                        for (Link l : links) {
-                            if (!l.sentBridge) {
-                                l.sentBridge = true;
-                                l.send(new Frame(Frame.BRIDGE, myName, null));
+                directJoin = (from == null || from.peerName == null);
+                if (directJoin && from != null) {
+                    if (passiveRelayPeer && hasActiveLinkForBaseName(from, senderBase)) {
+                        links.remove(from);
+                        redundantLinkToClose = from;
+                    } else {
+                        Link handoverOld = findHandoverLink(from, f.sender);
+                        if (handoverOld != null) {
+                            links.remove(handoverOld);
+                            for (String b : handoverOld.behind) {
+                                if (!isPassiveRelayName(b)) from.behind.add(b);
                             }
-                        }
-                    }
-                    if (multiHop || handoverOld != null) {
-                        from.send(buildClusterFrame());
-                        // Everyone we know of, including phones behind bridges/relays.
-                        for (Map.Entry<String, byte[]> e : members.entrySet()) {
-                            if (!e.getKey().equals(f.sender)) from.send(new Frame(Frame.HELLO, e.getKey(), e.getValue()));
-                        }
-                        synchronized (presences) {
-                            for (Map.Entry<String, byte[]> e : presences.entrySet()) {
-                                from.send(new Frame(Frame.PRESENCE, e.getKey(), e.getValue()));
+                            handoverOld.peerName = null;
+                            handoverOld.behind.clear();
+                            from.replacedLink = handoverOld;
+                        } else if (!passiveRelayPeer && multiHop && nameTaken(f.sender)) {
+                            if (from == uplink) {
+                                cb.onStatus("Nama \"" + f.sender + "\" dipakai di dua grup; jembatan dibatalkan");
+                                from.close();
+                            } else {
+                                from.send(new Frame(Frame.REJECT, myName,
+                                        ("Nama \"" + f.sender + "\" sudah dipakai di grup ini. Ganti nama lalu sambung lagi.")
+                                                .getBytes(UTF8)));
                             }
+                            return;
                         }
-                        synchronized (history) {
-                            for (Frame h : history) {
-                                if (!h.sender.equals(f.sender)
-                                        && (h.sender.equals(myName) || members.containsKey(h.sender))) {
-                                    from.send(h);
+                        from.peerName = f.sender;
+                        from.peerPhoto = f.payload;
+                        from.behind.add(f.sender);
+                        if (passiveRelayPeer) {
+                            from.relay = true;
+                        }
+                        if (links.size() > 1 || !members.isEmpty()) {
+                            for (Link l : links) {
+                                if (!l.sentBridge) {
+                                    l.sentBridge = true;
+                                    l.send(new Frame(Frame.BRIDGE, myName, null));
                                 }
                             }
                         }
-                        byte[] info = joinInfo;
-                        if (owner && info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
+                        if (multiHop || handoverOld != null || passiveRelayPeer) {
+                            from.send(buildClusterFrame());
+                            // Everyone we know of, including phones behind bridges/relays.
+                            for (Map.Entry<String, byte[]> e : members.entrySet()) {
+                                if (!e.getKey().equals(f.sender)) from.send(new Frame(Frame.HELLO, e.getKey(), e.getValue()));
+                            }
+                            synchronized (presences) {
+                                for (Map.Entry<String, byte[]> e : presences.entrySet()) {
+                                    from.send(new Frame(Frame.PRESENCE, e.getKey(), e.getValue()));
+                                }
+                            }
+                            synchronized (history) {
+                                for (Frame h : history) {
+                                    if (!h.sender.equals(f.sender)
+                                            && (h.sender.equals(myName) || members.containsKey(h.sender))) {
+                                        from.send(h);
+                                    }
+                                }
+                            }
+                            byte[] info = joinInfo;
+                            if (owner && info != null && from != uplink) from.send(new Frame(Frame.JOIN_INFO, myName, info));
+                        }
                     }
-                } else {
+                } else if (from != null) {
+                    if (passiveRelayPeer) return;
                     // Only a bridge/relay may introduce further phones, and never a name already in use.
                     if ((owner && !from.relay) || nameTaken(f.sender)) return;
                     from.behind.add(f.sender);
                 }
-                members.put(f.sender, f.payload);
+                if (redundantLinkToClose == null && !passiveRelayPeer) {
+                    members.put(f.sender, f.payload);
+                }
+            }
+            if (redundantLinkToClose != null) {
+                redundantLinkToClose.close();
+                return;
+            }
+            if (passiveRelayPeer) {
+                if (multiHop) broadcast(buildClusterFrame(), directJoin ? null : from);
+                return;
             }
             if (multiHop) {
                 broadcast(buildClusterFrame(), directJoin ? null : from);
@@ -637,8 +679,9 @@ final class Hub implements Link.Listener {
                         }
                         Integer cntObj = rxHembCounts.get(f.sender);
                         int cnt = cntObj != null ? cntObj : 0;
-                        if (cnt >= Adpcm.HEMB_WINDOW) cnt = 0;
-                        win[cnt] = hembFrame;
+                        if (cnt < Adpcm.HEMB_WINDOW) {
+                            win[cnt] = hembFrame;
+                        }
                         rxHembCounts.put(f.sender, cnt + 1);
                     }
                 }
@@ -653,7 +696,10 @@ final class Hub implements Link.Listener {
                     if (win != null && cnt == Adpcm.HEMB_WINDOW - 1) {
                         win[Adpcm.HEMB_WINDOW - 1] = null;
                         byte[] recAdpcm = Adpcm.recoverHembFrame(win, Adpcm.HEMB_WINDOW - 1, f.payload);
-                        if (recAdpcm != null) recoveredPcm = Adpcm.decode(recAdpcm);
+                        if (recAdpcm != null && recAdpcm.length == 84
+                                && recAdpcm[2] == 0 && recAdpcm[3] == Adpcm.NARROWBAND_FLAG) {
+                            recoveredPcm = Adpcm.decode(recAdpcm);
+                        }
                     }
                 }
                 if (recoveredPcm != null && recoveredPcm.length > 0) {
@@ -719,14 +765,16 @@ final class Hub implements Link.Listener {
                 cb.onPresence(originSender, innerPayload);
                 break;
             case Frame.AUDIO_ADPCM:
-                byte[] pcm = Adpcm.decode(innerPayload);
-                if (pcm.length > 0) cb.onAudio(originSender, pcm);
+                if (!hasMember(originSender)) {
+                    byte[] pcm = Adpcm.decode(innerPayload);
+                    if (pcm.length > 0) cb.onAudio(originSender, pcm);
+                }
                 break;
             case Frame.TALK_START:
-                cb.onTalkState(originSender, true);
+                if (!hasMember(originSender)) cb.onTalkState(originSender, true);
                 break;
             case Frame.TALK_END:
-                cb.onTalkState(originSender, false);
+                if (!hasMember(originSender)) cb.onTalkState(originSender, false);
                 break;
             default:
                 break;
@@ -756,7 +804,7 @@ final class Hub implements Link.Listener {
             return;
         }
         for (String name : new ArrayList<String>(link.behind)) {
-            if (stillReachable(name)) continue;
+            if (isPassiveRelayName(name) || stillReachable(name)) continue;
             if (owner || !links.isEmpty()) {
                 broadcast(new Frame(Frame.LEAVE, name, null), null);
             }
@@ -810,12 +858,28 @@ final class Hub implements Link.Listener {
 
     private Link findHandoverLink(Link incoming, String sender) {
         if (incoming == null || sender == null) return null;
+        String base = baseMemberName(sender);
         for (Link l : links) {
-            if (l != incoming && sender.equals(l.peerName) && l.lowBandwidth != incoming.lowBandwidth) {
+            if (l == incoming || l.peerName == null) continue;
+            if (sender.equals(l.peerName) && l.lowBandwidth != incoming.lowBandwidth) {
+                return l;
+            }
+            if (!isPassiveRelayName(sender) && isPassiveRelayName(l.peerName)
+                    && base.equals(baseMemberName(l.peerName))) {
                 return l;
             }
         }
         return null;
+    }
+
+    private boolean hasActiveLinkForBaseName(Link incoming, String baseName) {
+        if (baseName == null) return false;
+        for (Link l : links) {
+            if (l != incoming && l.peerName != null && baseName.equals(baseMemberName(l.peerName))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean stillReachable(String name) {
