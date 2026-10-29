@@ -129,8 +129,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     private final Voice voice = new Voice();
     private String myName;
     private byte[] myPhoto;
-    private boolean callMode;
-    private boolean speakerOn = true;
+    private volatile boolean callMode;
+    private volatile boolean speakerOn = true;
+    private volatile int primedVolumeStreams;
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
     private final Set<String> talkers = new LinkedHashSet<String>();
     private final List<WifiP2pDevice> peers = new ArrayList<WifiP2pDevice>();
@@ -154,7 +155,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     private SensorManager sensors;
     private SensorEventListener headingListener;
     private SensorEventListener proximityListener;
-    private boolean nearEar;
+    private volatile boolean nearEar;
     private final ApkShare apkShare = new ApkShare();
     private float heading;
     private RadarView radar;
@@ -216,6 +217,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         me.status = prefs.getInt("status", Presence.UNSET);
         if (me.status == Presence.SOS) statusBeforeSos = Presence.NEED_HELP;
         audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        applyAudioRoute();
         Alerts.createChannels(this);
         // SOS must be seen on a locked phone.
         w.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
@@ -266,7 +268,10 @@ public class MainActivity extends Activity implements Hub.Callback {
                         Hub h = hub;
                         if (h == null || !h.hasMember(packet.sender)) {
                             byte[] pcm = Adpcm.decode(packet.body);
-                            if (pcm.length > 0) voice.play(packet.sender, pcm);
+                            if (pcm.length > 0) {
+                                ensureFieldSpeakerVolume(false);
+                                voice.play(packet.sender, pcm);
+                            }
                             if (h != null && h.hasPeers()) h.relayMeshAudio(packet.sender, packet.body);
                         }
                     }
@@ -770,6 +775,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void onClick(View v) {
                 speakerOn = !speakerOn;
                 applyAudioRoute();
+                if (speakerOn) ensureFieldSpeakerVolume(true);
                 refreshControls();
             }
         });
@@ -1225,6 +1231,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         b.addView(time, fill());
         b.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                applyAudioRoute();
+                ensureFieldSpeakerVolume(false);
                 new Thread(new Runnable() {
                     @Override public void run() {
                         byte[] pcm = Adpcm.decode(adpcm);
@@ -2536,6 +2544,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         updateKeepAlive();
         alertBanner.setVisibility(View.GONE);
         applyAudioRoute();
+        ensureFieldSpeakerVolume(false);
         return hub;
     }
 
@@ -3162,8 +3171,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         sosSilenced.clear();
         stopAlarm();
         updateKeepAlive();
-        audio.setMode(AudioManager.MODE_NORMAL);
-        audio.setSpeakerphoneOn(false);
+        applyAudioRoute();
     }
 
     private void syncVoiceCoexistence() {
@@ -3175,9 +3183,43 @@ public class MainActivity extends Activity implements Hub.Callback {
     // ------------------------------------------------------- talk & chat
 
     private void applyAudioRoute() {
-        if (hub == null) return;
-        audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        audio.setSpeakerphoneOn(speakerOn && !(callMode && nearEar));
+        boolean hubActive = hub != null;
+        boolean loud = Voice.isLoudSpeakerActive(speakerOn, callMode, nearEar);
+        int mode = Voice.selectAudioMode(hubActive, speakerOn, callMode);
+        int stream = Voice.selectOutputStream(speakerOn, callMode, nearEar);
+        voice.configureOutput(stream, loud);
+        setVolumeControlStream(stream);
+        if (audio == null) return;
+        try {
+            if (mode == AudioManager.MODE_IN_COMMUNICATION) {
+                audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                audio.setSpeakerphoneOn(loud);
+            } else {
+                audio.setSpeakerphoneOn(false);
+                audio.setMode(AudioManager.MODE_NORMAL);
+            }
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void ensureFieldSpeakerVolume(boolean forceMax) {
+        if (audio == null || !Voice.isLoudSpeakerActive(speakerOn, callMode, nearEar)) return;
+        int stream = Voice.selectOutputStream(speakerOn, callMode, nearEar);
+        int bit = 1 << stream;
+        if (!forceMax && (primedVolumeStreams & bit) != 0) return;
+        synchronized (this) {
+            if (!forceMax && (primedVolumeStreams & bit) != 0) return;
+            primedVolumeStreams |= bit;
+            try {
+                int max = audio.getStreamMaxVolume(stream);
+                int cur = audio.getStreamVolume(stream);
+                int target = Voice.targetFieldVolume(cur, max, forceMax);
+                if (target > cur) {
+                    audio.setStreamVolume(stream, target, 0);
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
     }
 
     private void startProximity() {
@@ -3277,9 +3319,12 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (!callMode) {
             if (!ready()) return;
             callMode = true;
+            applyAudioRoute();
+            ensureFieldSpeakerVolume(false);
             startTalking();
             if (!voice.isCapturing()) {
                 callMode = false;
+                applyAudioRoute();
             } else {
                 startProximity();
                 addSystemMessage("Mode telepon aktif: mikrofon terus menyala.");
@@ -3485,6 +3530,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     @Override public void onAudio(String from, byte[] pcm) {
+        ensureFieldSpeakerVolume(false);
         voice.play(from, pcm);
     }
 

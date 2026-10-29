@@ -2,6 +2,21 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.26.0] - 2026-10-29
+
+### Diperbaiki & Dioptimalkan (Peningkatan Volume & Kejernihan Speaker Lapangan *Outdoor*)
+- **Full-Wattage Media Loudspeaker Routing untuk Walkie-Talkie PTT & Pesan Suara (`Voice`, `MainActivity`)**:
+  - Mengalihkan pemutaran *loudspeaker* Push-to-Talk & Pesan Suara (`speakerOn && !callMode`) dari profil telepon VoIP yang teredam (`MODE_IN_COMMUNICATION` + `STREAM_VOICE_CALL`) ke amplifier *smart-PA* penuh **`AudioManager.MODE_NORMAL` + `AudioManager.STREAM_MUSIC`**, sambil tetap menggunakan `MODE_IN_COMMUNICATION` + `STREAM_VOICE_CALL` saat **Mode Telepon** dua arah aktif (agar *hardware* `AcousticEchoCanceler` tetap meredam gema) maupun saat speaker dimatikan / HP ditempel ke telinga (*earpiece* `nearEar`).
+- **20 ms Windowed Outdoor Speech AGC (`+14 dB`), Noise Gate, & $C^1$ Soft-Knee Limiter (`Voice`)**:
+  - Menambahkan penguat suara percakapan lapangan `Voice.boostPcm` per jendela `20 ms` (`320 sampel`) yang mengangkat suara bicara pelan hingga **`5.0x` (`+14 dB`)** menuju puncak bersih `-2 dBFS` (`26.000`) untuk seluruh jalur suara (PTT, Mode Telepon *speakerphone*, Wi‑Fi Aware L2 Sidelink, dan Pesan Suara).
+  - Dilengkapi *noise gate* (`<= 280`) dengan peluruhan halus agar desis latar saat hening tidak ikut diperkeras, serta *soft-knee limiter* kontinu (`Voice.softLimit`) agar teriakan keras tidak pecah (*clipping*).
+  - Mengaktifkan pula DSP perangkat keras **`LoudnessEnhancer` (`+750 mB` / `+7,5 dB`)** pada `AudioTrack` ketika *loudspeaker* aktif (dan otomatis nonaktif saat mode *earpiece* di telinga) serta `AutomaticGainControl` pada tangkapan mikrofon `AudioRecord`.
+- **Sinkronisasi Tombol Fisik Volume & Batas Minimum Volume Lapangan (`MainActivity`, `Voice`)**:
+  - Mengikat `setVolumeControlStream()` secara dinamis ke kanal suara aktif (`STREAM_MUSIC` saat PTT *loudspeaker*, `STREAM_VOICE_CALL` saat Mode Telepon / *earpiece*) agar tombol fisik Volume Naik/Turun selalu mengatur kerasnya suara bicara, bukan dering telepon.
+  - Menaikkan otomatis volume *slider* speaker yang terlalu kecil ke minimal **`90%` maksimum** (`Voice.targetFieldVolume`) saat memulai sesi lapangan dan ke **`100%` maksimum** saat tombol Speaker dinyalakan secara eksplisit.
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan `fieldSpeakerBoostNoiseGateSoftLimiterAndAudioRouting` untuk memverifikasi penguatan suara pelan `+14 dB`, *noise gate* anti-desis, *soft-knee limiter*, pemrosesan per-jendela `20 ms` pada Pesan Suara, serta matriks *routing* 3-mode speaker vs *earpiece*.
+
 ## [0.25.0] - 2026-10-29
 
 ### Diperbaiki & Dioptimalkan (Perbaikan Audio Patah-Patah Jarak Dekat & Eliminasi Duplikat User `#relay`)

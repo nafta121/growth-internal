@@ -1303,4 +1303,116 @@ public class AdpcmTest {
         assertEquals(MeshAccess.STATE_ENCRYPTED, sPeriph.state);
         return pair;
     }
+
+    private static byte[] makeSinePcm(int samples, double amplitude) {
+        byte[] pcm = new byte[samples * 2];
+        ByteBuffer buf = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < samples; i++) {
+            int s = (int) Math.round(Math.sin(2.0 * Math.PI * 1000.0 * i / Voice.RATE) * amplitude);
+            if (s > 32767) s = 32767;
+            if (s < -32768) s = -32768;
+            buf.putShort((short) s);
+        }
+        return pcm;
+    }
+
+    private static int pcmPeak(byte[] pcm, int startSample, int endSample) {
+        int peak = 0;
+        for (int i = startSample; i < endSample; i++) {
+            int lo = pcm[i * 2] & 0xFF;
+            int hi = pcm[i * 2 + 1];
+            int s = (short) ((hi << 8) | lo);
+            int abs = s < 0 ? -s : s;
+            if (abs > peak) peak = abs;
+        }
+        return peak;
+    }
+
+    @Test public void fieldSpeakerBoostNoiseGateSoftLimiterAndAudioRouting() {
+        int frameSamples = Voice.FRAME_BYTES / 2;
+
+        // 1. Quiet field speech (~-24 dBFS, peak 2000) is boosted ~4.0x on frame 1 and ~5.0x (+14 dB) by frame 3
+        byte[] quietSpeech = makeSinePcm(frameSamples, 2000.0);
+        byte[] out = new byte[Voice.FRAME_BYTES];
+        int gain = Voice.BOOST_UNITY_Q10;
+        gain = Voice.boostPcm(quietSpeech, out, gain);
+        int frame1Peak = pcmPeak(out, 64, frameSamples);
+        assertTrue("First quiet speech frame must already rise >= 3.8x, got " + frame1Peak,
+                frame1Peak >= 7600 && frame1Peak <= 10500);
+        gain = Voice.boostPcm(quietSpeech, out, gain);
+        gain = Voice.boostPcm(quietSpeech, out, gain);
+        int frame3Peak = pcmPeak(out, 64, frameSamples);
+        assertTrue("Sustained quiet speech must reach ~4.9x-5.0x (+14 dB), got " + frame3Peak,
+                frame3Peak >= 9600 && frame3Peak <= 10200);
+
+        // 2. Moderate field speech (peak 6000) normalizes cleanly toward BOOST_TARGET_PEAK (~26000) without clipping
+        byte[] normalSpeech = makeSinePcm(frameSamples, 6000.0);
+        int normGain = Voice.BOOST_UNITY_Q10;
+        for (int k = 0; k < 4; k++) {
+            normGain = Voice.boostPcm(normalSpeech, out, normGain);
+        }
+        int normalPeak = pcmPeak(out, 64, frameSamples);
+        assertTrue("Normal speech must normalize near -2 dBFS (~25000-26500), got " + normalPeak,
+                normalPeak >= 24500 && normalPeak <= 26500);
+
+        // 3. Idle background noise floor (peak 180 <= BOOST_NOISE_FLOOR) must NOT be amplified into static hiss
+        byte[] idleNoise = makeSinePcm(frameSamples, 180.0);
+        byte[] idleBoosted = Voice.boostFieldAudio(idleNoise);
+        assertEquals("Idle noise below gate must stay at exact 1.0x amplitude",
+                pcmPeak(idleNoise, 0, frameSamples), pcmPeak(idleBoosted, 0, frameSamples));
+
+        // After active speech, silence decays gain smoothly back toward unity
+        int decayedGain = gain;
+        for (int k = 0; k < 8; k++) {
+            decayedGain = Voice.boostPcm(idleNoise, out, decayedGain);
+        }
+        assertTrue("Gain must decay smoothly back near unity during silence, got " + decayedGain,
+                decayedGain <= Voice.BOOST_UNITY_Q10 + 32);
+
+        // 4. Sudden loud transient after high-gain quiet speech + Short.MIN_VALUE soft-knee safety
+        byte[] loudShout = makeSinePcm(frameSamples, 28000.0);
+        ByteBuffer.wrap(loudShout).order(ByteOrder.LITTLE_ENDIAN).putShort(0, Short.MIN_VALUE);
+        Voice.boostPcm(loudShout, out, Voice.BOOST_MAX_Q10);
+        int loudPeak = pcmPeak(out, 0, frameSamples);
+        assertTrue("Soft-knee limiter + fast attack must prevent overflow/hard-clip, got " + loudPeak,
+                loudPeak >= 26000 && loudPeak <= 32767);
+        assertTrue(Voice.softLimit(160000) > Voice.BOOST_SOFT_KNEE && Voice.softLimit(160000) <= 32767);
+        assertTrue(Voice.softLimit(-160000) < -Voice.BOOST_SOFT_KNEE && Voice.softLimit(-160000) >= -32767);
+
+        // 5. Multi-window Voice Note: a loud cough in window 0 must not suppress quiet speech in windows 1..4
+        byte[] voiceNote = new byte[Voice.FRAME_BYTES * 5];
+        System.arraycopy(makeSinePcm(frameSamples, 25000.0), 0, voiceNote, 0, Voice.FRAME_BYTES);
+        for (int w = 1; w < 5; w++) {
+            System.arraycopy(quietSpeech, 0, voiceNote, w * Voice.FRAME_BYTES, Voice.FRAME_BYTES);
+        }
+        byte[] boostedNote = Voice.boostFieldAudio(voiceNote);
+        int tailNotePeak = pcmPeak(boostedNote, frameSamples * 4 + 64, frameSamples * 5);
+        assertTrue("20 ms windowed AGC must boost quiet Voice Note speech after initial loud spike, got "
+                + tailNotePeak, tailNotePeak >= 9500);
+
+        // 6. 3-state field audio routing & hardware volume floor invariants
+        // Walkie-talkie PTT & Voice Note loudspeaker: full-wattage MODE_NORMAL + STREAM_MUSIC
+        assertTrue(Voice.isLoudSpeakerActive(true, false, false));
+        assertTrue(Voice.isLoudSpeakerActive(true, false, true)); // hand near sensor during PTT must keep speaker on
+        assertEquals(android.media.AudioManager.MODE_NORMAL, Voice.selectAudioMode(true, true, false));
+        assertEquals(android.media.AudioManager.STREAM_MUSIC, Voice.selectOutputStream(true, false, false));
+
+        // Full-duplex Mode Telepon on speakerphone: MODE_IN_COMMUNICATION (for hardware AEC) + STREAM_VOICE_CALL + boost
+        assertTrue(Voice.isLoudSpeakerActive(true, true, false));
+        assertEquals(android.media.AudioManager.MODE_IN_COMMUNICATION, Voice.selectAudioMode(true, true, true));
+        assertEquals(android.media.AudioManager.STREAM_VOICE_CALL, Voice.selectOutputStream(true, true, false));
+
+        // Mode Telepon held to ear (nearEar=true) OR speaker toggled OFF: earpiece without loudspeaker boost
+        assertFalse(Voice.isLoudSpeakerActive(true, true, true));
+        assertFalse(Voice.isLoudSpeakerActive(false, false, false));
+        assertEquals(android.media.AudioManager.MODE_IN_COMMUNICATION, Voice.selectAudioMode(true, false, false));
+        assertEquals(android.media.AudioManager.STREAM_VOICE_CALL, Voice.selectOutputStream(true, true, true));
+        assertEquals(android.media.AudioManager.STREAM_VOICE_CALL, Voice.selectOutputStream(false, false, false));
+
+        // Field volume floor: lifts low slider to >= 90% on group start, 100% on explicit speaker button ON
+        assertEquals(14, Voice.targetFieldVolume(3, 15, false));
+        assertEquals(15, Voice.targetFieldVolume(15, 15, false));
+        assertEquals(15, Voice.targetFieldVolume(10, 15, true));
+        assertEquals(6, Voice.targetFieldVolume(2, 6, false));
+    }
 }
