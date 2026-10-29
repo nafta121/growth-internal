@@ -66,7 +66,7 @@ final class Hub implements Link.Listener {
 
     private final Callback cb;
     private final List<Link> links = new CopyOnWriteArrayList<Link>();
-    private final Set<InetSocketAddress> activeReconnects = java.util.Collections.newSetFromMap(
+    private final java.util.Set<InetSocketAddress> activeReconnects = java.util.Collections.newSetFromMap(
             new java.util.concurrent.ConcurrentHashMap<InetSocketAddress, Boolean>());
     private final Map<String, byte[]> members = new LinkedHashMap<String, byte[]>();
     private final Clips.Assembler clips = new Clips.Assembler();
