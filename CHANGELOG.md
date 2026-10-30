@@ -2,6 +2,26 @@
 
 Semua perubahan penting pada proyek **Growth Internal** didokumentasikan di berkas ini.
 
+## [0.27.0] - 2026-10-30
+
+### Ditambahkan & Dioptimalkan (Prioritas #1 Wi‑Fi Lokal / Hotspot Multi-User, Mode Radio Eksklusif, & Auto-Fallback Isolasi Router / Putus Jaringan)
+- **Prioritas #1 Selalu Wi‑Fi Lokal / Mobile Hotspot (`Lan`, `MainActivity`, `Hub`, `Link`)**:
+  - Menjadikan **Wi‑Fi Lokal / Mobile Hotspot (`Lan`)** sebagai **Prioritas #1** setiap kali `>= 2` pengguna berada dalam satu jaringan Wi‑Fi lokal atau Hotspot yang sama (`lanExclusiveMode`), termasuk *make-before-break handover* `0 ms` (`Hub.findHandoverLink` & `Link.lanLink`) dari koneksi BLE / Wi‑Fi Aware / Wi‑Fi Direct ke Wi‑Fi Lokal tanpa penolakan nama duplikat.
+  - Memisahkan deteksi antarmuka Wi‑Fi Lokal / SoftAP (`Lan.localWifiIPv4`, `Lan.isLocalWifiSocket`, `Lan.isP2pSubnetAddress`) dari antarmuka `p2p*` (Wi‑Fi Direct) dan `aware*` (Wi‑Fi Aware) sehingga paket UDP `8989` tidak pernah bocor ke grup Wi‑Fi Direct.
+- **Pemilihan 1 Owner Deterministik untuk Multi-User (`2..16+` HP) Tanpa Split-Brain (`MeshCoordinator`, `Lan`, `MainActivity`)**:
+  - Mengimplementasikan `MeshCoordinator.selectLanOwner` & `MeshCoordinator.isBetterLanOwner` yang memilih tepat **1 `Hub` Owner** secara konsisten di seluruh perangkat pada jaringan yang sama dengan urutan prioritas total:
+    1. Grup multi-anggota yang sudah aktif (`inGroup && memberCount > 1`, ukuran terbesar menang, *tie-breaker* `clusterId` terkecil) agar pengguna yang baru bergabung ke Wi‑Fi tidak pernah memutus panggilan yang sedang berlangsung.
+    2. HP **Host Mobile Hotspot** (`Lan.isHostingHotspot` / gateway `.1` / antarmuka `ap*`/`softap*`/`swlan*`/`wlan1`) agar seluruh klien Hotspot terhubung dalam **1 hop radio langsung** ke HP pembuat Hotspot.
+    3. Nama pengguna terkecil secara leksikografis (`a.compareTo(b) < 0`), dilengkapi balasan UDP cepat (`onLanPeer`) untuk konvergensi tabel rekan `< 50 ms` dan penggabungan klaster bebas *loop* (`isSmallestInMyGroup`).
+- **Penonaktifan Otomatis Radio Non-LAN & Re-Aktivasi Otomatis Saat Terputus / Sendirian / Client Isolation (`MainActivity`, `MeshCoordinator`, `Hub`, `Bt`)**:
+  - Selama berada dalam satu jaringan Wi‑Fi Lokal / Hotspot bersama minimal 1 rekan yang dapat dijangkau (`MeshCoordinator.shouldDisableNonLanTransports == true`), aplikasi **mematikan otomatis** seluruh radio non-LAN (**Wi‑Fi Aware `Aware.stop()`, Wi‑Fi Direct `stopPeerDiscovery`/`cancelConnect`/`removeGroup`, Bluetooth `Bt.stop()`, dan BLE Mesh `Ble.stop()`**) serta menutup link non-LAN lama (`Hub.closeNonLanLinks`) untuk mengeliminasi interferensi koeksistensi 2,4 GHz dan menghemat baterai.
+  - **Re-aktivasi & *Auto-Fallback* Otomatis**: Wi‑Fi Aware, Wi‑Fi Direct, dan Bluetooth / BLE Mesh otomatis **aktif kembali** ketika:
+    1. Pengguna terputus dari Wi‑Fi Lokal atau mematikan Mobile Hotspot (`NETWORK_STATE_CHANGED_ACTION`, `WIFI_STATE_CHANGED_ACTION`, `WIFI_AP_STATE_CHANGED`, `CONNECTIVITY_ACTION` → `Hub.closeLanLinks()` dalam `0 ms`),
+    2. Pengguna tidak lagi berada dalam satu jaringan Wi‑Fi dengan pengguna lain (seluruh rekan LAN keluar dari jaringan), atau
+    3. Router menerapkan **AP Client Isolation** (UDP `8989` terlihat tetapi TCP `8988` antar-klien diblokir — dideteksi dua sisi baik di klien melalui `Hub.connectPeer` `onFail` → `markLanIsolated` maupun di Owner melalui `checkOwnerSideLanIsolation`, serta otomatis di-reset begitu berpindah ke subnet Wi‑Fi/Hotspot baru).
+- **Pengujian Otomatis (`AdpcmTest`)**:
+  - Menambahkan `lanPriorityDeterministicMultiUserOwnerClientIsolationAndAutoFallback` untuk memverifikasi pemilihan 1 Owner deterministik 5 pengguna (router biasa, Mobile Hotspot Host `.1`, dan grup aktif), kebijakan radio eksklusif LAN, deteksi AP Client Isolation 2 sisi + reset subnet baru, serta *make-before-break handover* `Hub` ke/dari `lanLink`.
+
 ## [0.26.0] - 2026-10-29
 
 ### Diperbaiki & Dioptimalkan (Peningkatan Volume & Kejernihan Speaker Lapangan *Outdoor*)

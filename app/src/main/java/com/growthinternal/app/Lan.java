@@ -28,14 +28,24 @@ final class Lan {
         final boolean inGroup;
         final int memberCount;
         final int clusterId;
+        final boolean hotspotHost;
+        final long seenAtMs;
 
         Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount, int clusterId) {
+            this(name, address, port, inGroup, memberCount, clusterId,
+                    isGatewayAddress(address), System.currentTimeMillis());
+        }
+
+        Peer(String name, InetAddress address, int port, boolean inGroup, int memberCount,
+                int clusterId, boolean hotspotHost, long seenAtMs) {
             this.name = name;
             this.address = address;
             this.port = port;
             this.inGroup = inGroup;
             this.memberCount = memberCount;
             this.clusterId = clusterId & 0xFFFF;
+            this.hotspotHost = hotspotHost;
+            this.seenAtMs = seenAtMs;
         }
     }
 
@@ -65,7 +75,7 @@ final class Lan {
                     while (!stopped) {
                         DatagramPacket pkt = new DatagramPacket(buf, buf.length);
                         s.receive(pkt);
-                        if (isLocalAddress(pkt.getAddress())) continue;
+                        if (isLocalAddress(pkt.getAddress()) || isP2pSubnetAddress(pkt.getAddress())) continue;
                         Peer peer = decodePacket(pkt.getData(), pkt.getLength(), pkt.getAddress());
                         if (peer != null && listener != null) {
                             listener.onPeer(peer);
@@ -84,7 +94,7 @@ final class Lan {
         if (name == null || name.trim().isEmpty()) return;
         new Thread(new Runnable() {
             @Override public void run() {
-                byte[] data = encodePacket(name, hubPort, inGroup, memberCount, clusterId);
+                byte[] data = encodePacket(name, hubPort, inGroup, memberCount, clusterId, isHostingHotspot());
                 DatagramSocket s = socket;
                 boolean tempSocket = false;
                 try {
@@ -119,10 +129,19 @@ final class Lan {
     }
 
     static byte[] encodePacket(String name, int hubPort, boolean inGroup, int memberCount, int clusterId) {
+        return encodePacket(name, hubPort, inGroup, memberCount, clusterId, false);
+    }
+
+    static byte[] encodePacket(String name, int hubPort, boolean inGroup, int memberCount,
+            int clusterId, boolean hotspotHost) {
         String clean = name.replace('\n', ' ').trim();
+        int cid = clusterId & 0xFFFF;
+        String suffix = hotspotHost
+                ? ("\n" + cid + "\n1")
+                : (cid != 0 ? "\n" + cid : "");
         String msg = MAGIC + "\n" + clean + "\n" + hubPort + "\n"
                 + (inGroup ? "1" : "0") + "\n" + Math.max(0, memberCount)
-                + ((clusterId & 0xFFFF) != 0 ? "\n" + (clusterId & 0xFFFF) : "");
+                + suffix;
         return msg.getBytes(Hub.UTF8);
     }
 
@@ -149,7 +168,10 @@ final class Lan {
         if (parts.length >= 6) {
             try { clusterId = Integer.parseInt(parts[5].trim()) & 0xFFFF; } catch (NumberFormatException ignored) {}
         }
-        return new Peer(name, sender, port, inGroup, count, clusterId);
+        boolean hotspotHost = (parts.length >= 7 && "1".equals(parts[6].trim()))
+                || isGatewayAddress(sender);
+        return new Peer(name, sender, port, inGroup, count, clusterId,
+                hotspotHost, System.currentTimeMillis());
     }
 
     static boolean isLocalAddress(InetAddress addr) {
@@ -189,6 +211,126 @@ final class Lan {
                 || lower.startsWith("wlan") || lower.startsWith("ap")
                 || lower.startsWith("softap") || lower.startsWith("swlan")
                 || lower.startsWith("wifi") || lower.startsWith("uap");
+    }
+
+    static boolean isGatewayAddress(InetAddress addr) {
+        if (!(addr instanceof Inet4Address) || addr.isLoopbackAddress()) return false;
+        byte[] raw = addr.getAddress();
+        return raw != null && raw.length == 4 && (raw[3] & 0xFF) == 1;
+    }
+
+    static boolean isHotspotInterface(String ifName) {
+        if (ifName == null) return false;
+        String lower = ifName.trim().toLowerCase();
+        return lower.startsWith("ap") || lower.startsWith("softap")
+                || lower.startsWith("swlan") || lower.startsWith("uap")
+                || lower.startsWith("wl0.") || "wlan1".equals(lower) || "wlan2".equals(lower);
+    }
+
+    static boolean isHostingHotspot() {
+        try {
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            if (ifs == null) return false;
+            while (ifs.hasMoreElements()) {
+                NetworkInterface nif = ifs.nextElement();
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+                if (ifName.startsWith("p2p") || ifName.startsWith("aware")
+                        || isVirtualOrCellularInterface(ifName)) {
+                    continue;
+                }
+                boolean hotspotIf = isHotspotInterface(ifName);
+                Enumeration<InetAddress> addrs = nif.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    InetAddress a = addrs.nextElement();
+                    if (a instanceof Inet4Address && !a.isLoopbackAddress()) {
+                        if (hotspotIf || isGatewayAddress(a)) return true;
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return false;
+    }
+
+    private static boolean sameIpv4Subnet(byte[] a, byte[] b, int prefixLen) {
+        if (a == null || b == null || a.length != 4 || b.length != 4) return false;
+        int av = ((a[0] & 0xFF) << 24) | ((a[1] & 0xFF) << 16) | ((a[2] & 0xFF) << 8) | (a[3] & 0xFF);
+        int bv = ((b[0] & 0xFF) << 24) | ((b[1] & 0xFF) << 16) | ((b[2] & 0xFF) << 8) | (b[3] & 0xFF);
+        int mask = prefixLen <= 0 ? 0 : (prefixLen >= 32 ? -1 : (-1 << (32 - prefixLen)));
+        return (av & mask) == (bv & mask);
+    }
+
+    static boolean isP2pSubnetAddress(InetAddress remote) {
+        if (!(remote instanceof Inet4Address)) return false;
+        byte[] r = remote.getAddress();
+        try {
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            if (ifs == null) return false;
+            while (ifs.hasMoreElements()) {
+                NetworkInterface nif = ifs.nextElement();
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+                if (!ifName.startsWith("p2p")) continue;
+                for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
+                    InetAddress a = ia.getAddress();
+                    if (!(a instanceof Inet4Address)) continue;
+                    int prefix = ia.getNetworkPrefixLength();
+                    if (prefix <= 0 || prefix > 32) prefix = 24;
+                    if (sameIpv4Subnet(a.getAddress(), r, prefix)) return true;
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return false;
+    }
+
+    static boolean isLocalWifiSocket(java.net.Socket s) {
+        if (s == null) return false;
+        InetAddress local = s.getLocalAddress();
+        InetAddress remote = s.getInetAddress();
+        if (!(local instanceof Inet4Address) || !(remote instanceof Inet4Address)) return false;
+        if (local.isLoopbackAddress() || local.isAnyLocalAddress() || remote.isLoopbackAddress()) {
+            return false;
+        }
+        if (isP2pSubnetAddress(remote)) return false;
+        try {
+            NetworkInterface nif = NetworkInterface.getByInetAddress(local);
+            if (nif == null) return false;
+            String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+            return !ifName.startsWith("p2p") && !ifName.startsWith("aware")
+                    && !isVirtualOrCellularInterface(ifName);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    static InetAddress localWifiIPv4() {
+        InetAddress otherLan = null;
+        try {
+            Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+            if (ifs == null) return null;
+            while (ifs.hasMoreElements()) {
+                NetworkInterface nif = ifs.nextElement();
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+                if (ifName.startsWith("p2p") || ifName.startsWith("aware")
+                        || isVirtualOrCellularInterface(ifName)) {
+                    continue;
+                }
+                boolean isWifi = isPreferredWifiInterface(ifName);
+                Enumeration<InetAddress> addrs = nif.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    InetAddress a = addrs.nextElement();
+                    if (a instanceof Inet4Address && !a.isLoopbackAddress()) {
+                        if (isWifi) return a;
+                        if (otherLan == null) otherLan = a;
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return otherLan;
     }
 
     static InetAddress gatewayFor(InetAddress ipv4) {
@@ -240,7 +382,11 @@ final class Lan {
                 while (ifs.hasMoreElements()) {
                     NetworkInterface nif = ifs.nextElement();
                     if (!nif.isUp() || nif.isLoopback()) continue;
-                    if (isVirtualOrCellularInterface(nif.getName())) continue;
+                    String ifName = nif.getName() != null ? nif.getName().toLowerCase() : "";
+                    if (ifName.startsWith("p2p") || ifName.startsWith("aware")
+                            || isVirtualOrCellularInterface(ifName)) {
+                        continue;
+                    }
                     for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
                         InetAddress b = ia.getBroadcast();
                         if (b != null && !list.contains(b)) list.add(b);

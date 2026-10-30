@@ -102,6 +102,7 @@ final class Hub implements Link.Listener {
     private final byte[] myPhoto;
     private volatile boolean stopped;
     private volatile boolean owner;
+    private volatile boolean wildcardServer;
     private final List<ServerSocket> servers = new CopyOnWriteArrayList<ServerSocket>();
     private volatile Link uplink;
     private volatile byte[] joinInfo;
@@ -168,6 +169,50 @@ final class Hub implements Link.Listener {
         return false;
     }
 
+    boolean hasActiveLanPeer() {
+        for (Link l : links) {
+            if (l.lanLink && !l.isClosed() && l.peerName != null && !isPassiveRelayName(l.peerName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    boolean hasLanLinkTo(String name) {
+        if (name == null) return false;
+        for (Link l : links) {
+            if (l.lanLink && !l.isClosed() && (name.equals(l.peerName) || l.behind.contains(name))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void closeNonLanLinks() {
+        for (Link l : links) {
+            if (!l.lanLink) {
+                l.reconnectTarget = null;
+                l.close();
+            }
+        }
+    }
+
+    void closeLanLinks() {
+        for (Link l : links) {
+            if (l.lanLink) {
+                l.reconnectTarget = null;
+                l.close();
+            }
+        }
+    }
+
+    void ensureLanServer() {
+        owner = true;
+        if (!wildcardServer) {
+            startServer(null);
+        }
+    }
+
     boolean isOwner() { return owner; }
 
     Hub asOwner(boolean isOwner) {
@@ -199,6 +244,7 @@ final class Hub implements Link.Listener {
      */
     void startServer(final InetAddress groupAddress) {
         owner = true;
+        if (groupAddress == null) wildcardServer = true;
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
@@ -251,14 +297,14 @@ final class Hub implements Link.Listener {
         final InetSocketAddress target = new InetSocketAddress(host, peerPort);
         new Thread(new Runnable() {
             @Override public void run() {
-                for (int attempt = 0; attempt < 4 && !stopped; attempt++) {
+                for (int attempt = 0; attempt < 3 && !stopped; attempt++) {
                     try {
                         Socket s = new Socket();
-                        s.connect(target, 3500);
+                        s.connect(target, 2000);
                         addLink(s, target);
                         return;
                     } catch (IOException e) {
-                        try { Thread.sleep(800); } catch (InterruptedException ie) { return; }
+                        try { Thread.sleep(400); } catch (InterruptedException ie) { return; }
                     }
                 }
                 if (!stopped && onFail != null) onFail.run();
@@ -321,8 +367,14 @@ final class Hub implements Link.Listener {
 
     void addStreamLink(java.io.InputStream in, java.io.OutputStream out,
             java.io.Closeable raw, boolean lowBandwidth) throws IOException {
+        addStreamLink(in, out, raw, lowBandwidth, false);
+    }
+
+    void addStreamLink(java.io.InputStream in, java.io.OutputStream out,
+            java.io.Closeable raw, boolean lowBandwidth, boolean lanLink) throws IOException {
         if (stopped || links.size() >= MAX_LINKS) { raw.close(); return; }
         Link link = new Link(in, out, raw, lowBandwidth, this);
+        link.lanLink = lanLink;
         link.send(buildClusterFrame());
         link.send(new Frame(Frame.HELLO, myName, myPhoto));
         byte[] p = myPresence;
@@ -861,7 +913,8 @@ final class Hub implements Link.Listener {
         String base = baseMemberName(sender);
         for (Link l : links) {
             if (l == incoming || l.peerName == null) continue;
-            if (sender.equals(l.peerName) && l.lowBandwidth != incoming.lowBandwidth) {
+            if (sender.equals(l.peerName)
+                    && (l.lowBandwidth != incoming.lowBandwidth || l.lanLink != incoming.lanLink)) {
                 return l;
             }
             if (!isPassiveRelayName(sender) && isPassiveRelayName(l.peerName)

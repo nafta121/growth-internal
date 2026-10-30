@@ -1,6 +1,8 @@
 package com.growthinternal.app;
 
+import java.net.InetAddress;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -13,6 +15,8 @@ final class MeshCoordinator {
     static final long AUTO_COOLDOWN_MS = 12000L;
     static final long DISCONNECT_PAUSE_MS = 15000L;
     static final long DEAF_TIMEOUT_MS = 12000L;
+    static final long LAN_PEER_TTL_MS = 75000L;
+    static final long LAN_OWNER_WAIT_ISOLATION_MS = 9000L;
     private static final long DEDUP_WINDOW_MS = 10000L;
     private static final long STATS_TTL_MS = 30000L;
 
@@ -73,6 +77,8 @@ final class MeshCoordinator {
         }
     };
     private final Map<String, Boolean> gatewayPeers = new LinkedHashMap<String, Boolean>();
+    private final Map<String, Long> lanIsolatedPeers = new HashMap<String, Long>();
+    private final Map<String, Long> lanOwnerWaitSince = new HashMap<String, Long>();
     private long autoConnectPauseUntil;
     private Hub relayHub;
 
@@ -92,6 +98,131 @@ final class MeshCoordinator {
         autoConnectPauseUntil = 0;
         autoConnectCooldown.clear();
         peerStats.clear();
+        clearAllLanState();
+    }
+
+    static String lanPeerKey(String peerName, InetAddress addr) {
+        String ip = addr != null ? addr.getHostAddress() : "";
+        return (peerName != null ? peerName : "") + "@" + ip;
+    }
+
+    void markLanIsolated(String peerName, InetAddress addr) {
+        if (peerName == null) return;
+        String key = lanPeerKey(peerName, addr);
+        lanIsolatedPeers.put(key, System.currentTimeMillis());
+        lanOwnerWaitSince.remove(key);
+        clearPeerCooldown(peerName);
+    }
+
+    void clearLanIsolation(String peerName) {
+        if (peerName == null) return;
+        String prefix = peerName + "@";
+        Iterator<String> it1 = lanIsolatedPeers.keySet().iterator();
+        while (it1.hasNext()) {
+            if (it1.next().startsWith(prefix)) it1.remove();
+        }
+        Iterator<String> it2 = lanOwnerWaitSince.keySet().iterator();
+        while (it2.hasNext()) {
+            if (it2.next().startsWith(prefix)) it2.remove();
+        }
+    }
+
+    void clearAllLanState() {
+        lanIsolatedPeers.clear();
+        lanOwnerWaitSince.clear();
+    }
+
+    boolean isLanIsolated(String peerName, InetAddress addr) {
+        if (peerName == null) return false;
+        return lanIsolatedPeers.containsKey(lanPeerKey(peerName, addr));
+    }
+
+    /**
+     * Owner-side AP Client Isolation detector: when this device is the elected LAN owner and sees
+     * UDP broadcasts from a LAN peer whose TCP port-8988 connection cannot reach us within
+     * LAN_OWNER_WAIT_ISOLATION_MS, marks the peer isolated on the owner side too so both phones
+     * re-enable Wi-Fi Aware / Wi-Fi Direct / BLE Mesh instead of 1-sided deafness.
+     */
+    boolean checkOwnerSideLanIsolation(String peerName, InetAddress addr,
+            boolean connectedOnLan, long nowMs) {
+        if (peerName == null) return false;
+        if (connectedOnLan) {
+            clearLanIsolation(peerName);
+            return false;
+        }
+        if (isLanIsolated(peerName, addr)) return true;
+        String key = lanPeerKey(peerName, addr);
+        Long since = lanOwnerWaitSince.get(key);
+        if (since == null) {
+            lanOwnerWaitSince.put(key, nowMs);
+            return false;
+        }
+        if (nowMs - since >= LAN_OWNER_WAIT_ISOLATION_MS) {
+            markLanIsolated(peerName, addr);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Pure radio-mode policy: returns true when non-LAN radios (Wi-Fi Aware, Wi-Fi Direct,
+     * Bluetooth / BLE Mesh) must be turned OFF because this phone is on a local Wi-Fi / Hotspot
+     * together with at least one reachable user on the same network.
+     */
+    static boolean shouldDisableNonLanTransports(boolean hasLocalWifiIp,
+            boolean hasActiveLanHubPeer, int usableLanPeerCount) {
+        return hasLocalWifiIp && (hasActiveLanHubPeer || usableLanPeerCount > 0);
+    }
+
+    /**
+     * Deterministic 1-Owner election across 2..16+ users on the same Local Wi-Fi / Hotspot.
+     * Total order:
+     * 1. Active multi-member group (inGroup && memberCount > 1) wins so latecomers never disrupt
+     *    an ongoing group; larger memberCount wins, ties broken by smaller non-zero clusterId.
+     * 2. Mobile Hotspot Host phone (.1 gateway / SoftAP interface) wins so all hotspot clients
+     *    connect in 1 direct radio hop to the Hotspot Host.
+     * 3. Lexicographically smallest user name wins.
+     * Returns null when zero non-expired, non-isolated LAN peers exist.
+     */
+    String selectLanOwner(String myName, boolean myInGroup, int myMemberCount, int myClusterId,
+            boolean myHotspotHost, Iterable<Lan.Peer> peers, long nowMs) {
+        if (myName == null || myName.trim().isEmpty() || peers == null) return null;
+        String bestName = myName;
+        boolean bestInGroup = myInGroup;
+        int bestCount = myMemberCount;
+        int bestCid = myClusterId & 0xFFFF;
+        boolean bestHotspot = myHotspotHost;
+        int usablePeers = 0;
+        for (Lan.Peer p : peers) {
+            if (p == null || p.name == null || p.name.isEmpty() || p.name.equals(myName)) continue;
+            if (p.seenAtMs > 0 && nowMs - p.seenAtMs > LAN_PEER_TTL_MS) continue;
+            if (isLanIsolated(p.name, p.address)) continue;
+            usablePeers++;
+            if (isBetterLanOwner(p.name, p.inGroup, p.memberCount, p.clusterId, p.hotspotHost,
+                    bestName, bestInGroup, bestCount, bestCid, bestHotspot)) {
+                bestName = p.name;
+                bestInGroup = p.inGroup;
+                bestCount = p.memberCount;
+                bestCid = p.clusterId & 0xFFFF;
+                bestHotspot = p.hotspotHost;
+            }
+        }
+        return usablePeers > 0 ? bestName : null;
+    }
+
+    static boolean isBetterLanOwner(String aName, boolean aInGroup, int aCount, int aCid, boolean aHotspot,
+            String bName, boolean bInGroup, int bCount, int bCid, boolean bHotspot) {
+        boolean aMulti = aInGroup && aCount > 1;
+        boolean bMulti = bInGroup && bCount > 1;
+        if (aMulti != bMulti) return aMulti;
+        if (aMulti) {
+            if (aCount != bCount) return aCount > bCount;
+            int ac = aCid & 0xFFFF;
+            int bc = bCid & 0xFFFF;
+            if (ac != bc && ac != 0 && bc != 0) return ac < bc;
+        }
+        if (aHotspot != bHotspot) return aHotspot;
+        return aName.compareTo(bName) < 0;
     }
 
     /**
@@ -189,12 +320,14 @@ final class MeshCoordinator {
     boolean canAutoConnect(String key, String peerName, String myName, Hub activeHub) {
         if (key == null || peerName == null || peerName.equals(myName)) return false;
         if (activeHub != null && activeHub.hasMember(peerName)) {
-            boolean upgradeToWifi = (key.startsWith("aware:") || key.startsWith("lan:"))
+            boolean upgradeToLan = key.startsWith("lan:")
+                    && !activeHub.hasLanLinkTo(peerName);
+            boolean upgradeToWifi = key.startsWith("aware:")
                     && activeHub.hasLowBandwidthLink(peerName);
             boolean handoverToBle = key.startsWith("bt:")
                     && !activeHub.hasLowBandwidthLink(peerName)
                     && shouldHandoverToBle(peerName);
-            if (!upgradeToWifi && !handoverToBle) return false;
+            if (!upgradeToLan && !upgradeToWifi && !handoverToBle) return false;
         }
         long now = System.currentTimeMillis();
         if (now < autoConnectPauseUntil) return false;

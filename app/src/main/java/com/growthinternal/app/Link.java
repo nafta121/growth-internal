@@ -49,11 +49,13 @@ final class Link {
     // True for a link to or from a bridge, which carries frames of many senders.
     volatile boolean relay;
     volatile boolean sentBridge;
+    volatile boolean lanLink;
     volatile Link replacedLink;
     volatile java.net.InetSocketAddress reconnectTarget;
 
     Link(Socket socket, Listener listener) throws IOException {
         this(configure(socket).getInputStream(), socket.getOutputStream(), socket, false, listener);
+        this.lanLink = Lan.isLocalWifiSocket(socket);
     }
 
     Link(InputStream in, OutputStream out, Closeable raw, boolean lowBandwidth, Listener listener) {

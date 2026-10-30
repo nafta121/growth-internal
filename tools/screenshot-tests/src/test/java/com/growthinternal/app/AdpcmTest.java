@@ -1415,4 +1415,173 @@ public class AdpcmTest {
         assertEquals(15, Voice.targetFieldVolume(10, 15, true));
         assertEquals(6, Voice.targetFieldVolume(2, 6, false));
     }
+
+    @Test public void lanPriorityDeterministicMultiUserOwnerClientIsolationAndAutoFallback() throws Exception {
+        long now = 100_000L;
+
+        // 1. Lan packet hotspotHost flag + gateway (.1) & SoftAP interface detection + loopback exclusion
+        InetAddress gwIp = InetAddress.getByName("192.168.43.1");
+        InetAddress c1Ip = InetAddress.getByName("192.168.43.11");
+        InetAddress c2Ip = InetAddress.getByName("192.168.43.12");
+        InetAddress c3Ip = InetAddress.getByName("192.168.43.13");
+        InetAddress c4Ip = InetAddress.getByName("192.168.43.14");
+        InetAddress c5Ip = InetAddress.getByName("192.168.43.15");
+        assertTrue(Lan.isGatewayAddress(gwIp));
+        assertFalse(Lan.isGatewayAddress(c1Ip));
+        assertTrue(Lan.isHotspotInterface("ap0"));
+        assertTrue(Lan.isHotspotInterface("swlan0"));
+        assertTrue(Lan.isHotspotInterface("wlan1"));
+        assertFalse(Lan.isHotspotInterface("wlan0"));
+        assertFalse(Lan.isHotspotInterface("p2p-wlan0-0"));
+
+        byte[] hostPkt = Lan.encodePacket("Dedi", 8988, false, 0, 0x1234, true);
+        Lan.Peer decodedHost = Lan.decodePacket(hostPkt, hostPkt.length, c4Ip);
+        assertNotNull(decodedHost);
+        assertEquals("Dedi", decodedHost.name);
+        assertEquals(0x1234, decodedHost.clusterId);
+        assertTrue("Explicit hotspotHost flag must survive Lan UDP encode/decode", decodedHost.hotspotHost);
+
+        byte[] legacyPkt = Lan.encodePacket("Dedi", 8988, false, 0, 0x1234);
+        assertTrue("Sender at .1 gateway IP must auto-detect as hotspotHost",
+                Lan.decodePacket(legacyPkt, legacyPkt.length, gwIp).hotspotHost);
+        assertFalse("Normal client IP without hotspot flag must not be marked hotspotHost",
+                Lan.decodePacket(legacyPkt, legacyPkt.length, c2Ip).hotspotHost);
+
+        // 2. Exclusive Same-LAN Radio Policy: non-LAN radios turn OFF iff on local Wi-Fi with >=1 peer
+        assertFalse("Alone on Wi-Fi (0 LAN peers) must keep Aware/P2P/BLE ON",
+                MeshCoordinator.shouldDisableNonLanTransports(true, false, 0));
+        assertTrue("2+ users on same Wi-Fi must turn Aware/P2P/BLE OFF (LAN Priority #1)",
+                MeshCoordinator.shouldDisableNonLanTransports(true, false, 1));
+        assertTrue("Active LAN Hub link must keep Aware/P2P/BLE OFF",
+                MeshCoordinator.shouldDisableNonLanTransports(true, true, 0));
+        assertFalse("Disconnecting from local Wi-Fi must immediately turn Aware/P2P/BLE back ON",
+                MeshCoordinator.shouldDisableNonLanTransports(false, false, 3));
+
+        // 3. Deterministic 1-Owner Election across 5 simultaneous users (Andi, Budi, Cici, Dedi, Eka)
+        String[] names = { "Andi", "Budi", "Cici", "Dedi", "Eka" };
+        InetAddress[] routerIps = { c1Ip, c2Ip, c3Ip, c4Ip, c5Ip };
+        java.util.List<Lan.Peer> allRouterPeers = new java.util.ArrayList<Lan.Peer>();
+        for (int i = 0; i < names.length; i++) {
+            allRouterPeers.add(new Lan.Peer(names[i], routerIps[i], 8988, false, 0, 0, false, now));
+        }
+        MeshCoordinator mc = new MeshCoordinator();
+        for (int i = 0; i < names.length; i++) {
+            String elected = mc.selectLanOwner(names[i], false, 0, 0, false, allRouterPeers, now);
+            assertEquals("All 5 fresh router peers must unanimously elect Andi", "Andi", elected);
+        }
+
+        // Mobile Hotspot case: Dedi hosts the Hotspot (192.168.43.1, hotspotHost=true) -> all 5 elect Dedi!
+        java.util.List<Lan.Peer> hotspotPeers = new java.util.ArrayList<Lan.Peer>();
+        for (int i = 0; i < names.length; i++) {
+            boolean isHost = "Dedi".equals(names[i]);
+            hotspotPeers.add(new Lan.Peer(names[i], isHost ? gwIp : routerIps[i],
+                    8988, false, 0, 0, isHost, now));
+        }
+        for (int i = 0; i < names.length; i++) {
+            boolean meHost = "Dedi".equals(names[i]);
+            String elected = mc.selectLanOwner(names[i], false, 0, 0, meHost, hotspotPeers, now);
+            assertEquals("All 5 phones on Dedi's Hotspot must unanimously elect Hotspot Host Dedi",
+                    "Dedi", elected);
+        }
+        // Even after Andi joins Dedi (both count=2, cid=0x7777), latecomers Budi/Cici/Eka still elect Dedi!
+        java.util.List<Lan.Peer> hotspotAfterFirstJoin = java.util.Arrays.asList(
+                new Lan.Peer("Andi", c1Ip, 8988, true, 2, 0x7777, false, now),
+                new Lan.Peer("Dedi", gwIp, 8988, true, 2, 0x7777, true, now),
+                new Lan.Peer("Cici", c3Ip, 8988, false, 0, 0, false, now));
+        assertEquals("Dedi", mc.selectLanOwner("Budi", false, 0, 0, false, hotspotAfterFirstJoin, now));
+
+        // Active multi-member group preservation: Budi/Cici/Dedi already in 3-person call -> latecomer Andi joins Budi!
+        java.util.List<Lan.Peer> ongoingGroup = java.util.Arrays.asList(
+                new Lan.Peer("Budi", c2Ip, 8988, true, 3, 0x2222, false, now),
+                new Lan.Peer("Cici", c3Ip, 8988, true, 3, 0x2222, false, now),
+                new Lan.Peer("Dedi", c4Ip, 8988, true, 3, 0x2222, false, now));
+        assertEquals("Latecomer Andi must join existing group owner Budi instead of disrupting active call",
+                "Budi", mc.selectLanOwner("Andi", false, 0, 0, false, ongoingGroup, now));
+
+        // 4. Two-Sided AP Client Isolation Auto-Fallback + Subnet Change Reset
+        // Client side: Budi fails TCP 8988 to Andi on isolated hotel router
+        assertTrue(mc.canAutoConnect("aware:Andi", "Andi", "Budi", null));
+        assertFalse("Cooldown initially active", mc.canAutoConnect("aware:Andi", "Andi", "Budi", null));
+        mc.markLanIsolated("Andi", c1Ip);
+        assertTrue(mc.isLanIsolated("Andi", c1Ip));
+        assertNull("When sole LAN peer Andi is Client-Isolated, selectLanOwner must return null for fallback",
+                mc.selectLanOwner("Budi", false, 0, 0, false,
+                        java.util.Collections.singletonList(
+                                new Lan.Peer("Andi", c1Ip, 8988, false, 0, 0, false, now)), now));
+        assertFalse("Isolated LAN peers (usable=0) must re-enable Aware/P2P/BLE immediately",
+                MeshCoordinator.shouldDisableNonLanTransports(true, false, 0));
+        assertTrue("markLanIsolated must clear peer cooldown so Aware/BLE fallback connects immediately",
+                mc.canAutoConnect("aware:Andi", "Andi", "Budi", null));
+
+        // Owner side: Andi waits for Budi's TCP connection; after LAN_OWNER_WAIT_ISOLATION_MS Andi marks Budi isolated too
+        MeshCoordinator ownerMc = new MeshCoordinator();
+        assertFalse(ownerMc.checkOwnerSideLanIsolation("Budi", c2Ip, false, now));
+        assertFalse(ownerMc.checkOwnerSideLanIsolation("Budi", c2Ip, false, now + 5000L));
+        assertTrue("Owner must also detect Client Isolation after LAN_OWNER_WAIT_ISOLATION_MS",
+                ownerMc.checkOwnerSideLanIsolation("Budi", c2Ip, false,
+                        now + MeshCoordinator.LAN_OWNER_WAIT_ISOLATION_MS));
+        assertTrue(ownerMc.isLanIsolated("Budi", c2Ip));
+
+        // Moving to a new Hotspot subnet (new IP) automatically clears isolation for the new IP!
+        InetAddress newHotspotIp = InetAddress.getByName("10.42.0.25");
+        assertFalse("New Wi-Fi/Hotspot IP must not inherit old router's Client Isolation flag",
+                mc.isLanIsolated("Andi", newHotspotIp));
+
+        // 5. Seamless Hub Make-Before-Break Handover (Aware/non-LAN -> LAN Priority #1) & 0-ms closeLanLinks()
+        HubTest.Rec rOwner = new HubTest.Rec();
+        HubTest.Rec rClient = new HubTest.Rec();
+        Hub hubOwner = new Hub("Andi", null, rOwner).asOwner(true);
+        Hub hubClient = new Hub("Budi", null, rClient).asOwner(true);
+
+        // Start connected over non-LAN high-speed stream (simulating Wi-Fi Aware: lowBandwidth=false, lanLink=false)
+        final PipedOutputStream aToB1 = new PipedOutputStream();
+        PipedInputStream bFromA1 = new PipedInputStream(aToB1, 32768);
+        final PipedOutputStream bToA1 = new PipedOutputStream();
+        PipedInputStream aFromB1 = new PipedInputStream(bToA1, 32768);
+        Closeable closeNonLan = new Closeable() {
+            @Override public void close() throws IOException {
+                aToB1.close(); bToA1.close();
+            }
+        };
+        hubOwner.addStreamLink(aFromB1, aToB1, closeNonLan, false, false);
+        hubClient.addStreamLink(bFromA1, bToA1, closeNonLan, false, false);
+        HubTest.waitFor(rOwner, "join:Budi");
+        HubTest.waitFor(rClient, "join:Andi");
+        assertFalse(hubOwner.hasActiveLanPeer());
+        assertTrue("MeshCoordinator must allow upgrading Aware/non-LAN link to LAN Priority #1",
+                new MeshCoordinator().canAutoConnect("lan:Andi", "Andi", "Budi", hubClient));
+
+        // Now both phones detect same Wi-Fi and open LAN link (lanLink=true) BEFORE closing old Aware link
+        final PipedOutputStream aToB2 = new PipedOutputStream();
+        PipedInputStream bFromA2 = new PipedInputStream(aToB2, 32768);
+        final PipedOutputStream bToA2 = new PipedOutputStream();
+        PipedInputStream aFromB2 = new PipedInputStream(bToA2, 32768);
+        Closeable closeLan = new Closeable() {
+            @Override public void close() throws IOException {
+                aToB2.close(); bToA2.close();
+            }
+        };
+        hubOwner.addStreamLink(aFromB2, aToB2, closeLan, false, true);
+        hubClient.addStreamLink(bFromA2, bToA2, closeLan, false, true);
+        Thread.sleep(200);
+        assertFalse("Make-before-break LAN upgrade must NEVER trigger duplicate-name rejection",
+                rClient.log.contains("rejected"));
+        assertTrue(hubOwner.hasActiveLanPeer());
+        assertTrue(hubOwner.hasLanLinkTo("Budi"));
+        assertTrue(hubClient.hasLanLinkTo("Andi"));
+
+        // Shut down non-LAN links once LAN is active; verify chat still flows over LAN link
+        hubOwner.closeNonLanLinks();
+        hubClient.closeNonLanLinks();
+        hubClient.sendText("Halo lewat Wi-Fi Lokal Prioritas #1");
+        HubTest.waitFor(rOwner, "text:Budi:Halo lewat Wi-Fi Lokal Prioritas #1");
+
+        // Simulate Wi-Fi disconnect: closeLanLinks() drops LAN socket immediately so fallback triggers in 0 ms
+        hubClient.closeLanLinks();
+        HubTest.waitFor(rOwner, "left:Budi");
+        assertFalse(hubOwner.hasActiveLanPeer());
+
+        hubClient.stop();
+        hubOwner.stop();
+    }
 }

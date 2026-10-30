@@ -83,6 +83,10 @@ final class Bt {
                         BluetoothServerSocket ss = (BluetoothServerSocket) BluetoothAdapter.class
                                 .getMethod("listenUsingInsecureL2capChannel")
                                 .invoke(adapter);
+                        if (!serverRunning) {
+                            ss.close();
+                            return;
+                        }
                         l2capServer = ss;
                         int psm = (Integer) BluetoothServerSocket.class
                                 .getMethod("getPsm")
@@ -99,15 +103,22 @@ final class Bt {
         }
         Thread rf = new Thread(new Runnable() {
             @Override public void run() {
+                BluetoothServerSocket ss = null;
                 try {
-                    BluetoothServerSocket ss = adapter.listenUsingInsecureRfcommWithServiceRecord(
+                    ss = adapter.listenUsingInsecureRfcommWithServiceRecord(
                             SERVICE_NAME, SERVICE_UUID);
+                    if (!serverRunning) {
+                        ss.close();
+                        return;
+                    }
                     rfcommServer = ss;
                     acceptLoop(ss);
                 } catch (IOException ignored) {
                 } catch (SecurityException ignored) {
                 } finally {
-                    serverRunning = false;
+                    if (ss == null || rfcommServer == ss) {
+                        serverRunning = false;
+                    }
                 }
             }
         }, "bt-rfcomm-server");

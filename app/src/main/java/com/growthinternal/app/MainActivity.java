@@ -29,7 +29,9 @@ import android.location.LocationManager;
 import android.os.BatteryManager;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
+import android.net.ConnectivityManager;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.net.wifi.WpsInfo;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
@@ -70,6 +72,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -102,6 +105,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     private static final int AMBER_SOFT = Color.rgb(254, 243, 219);
     private static final int AMBER_TEXT = Color.rgb(146, 84, 0);
     private static final long PRESENCE_EVERY_MS = 30000;
+    private static final String ACTION_WIFI_AP_STATE_CHANGED = "android.net.wifi.WIFI_AP_STATE_CHANGED";
 
     private WifiP2pManager p2p;
     private WifiP2pManager.Channel channel;
@@ -122,6 +126,11 @@ public class MainActivity extends Activity implements Hub.Callback {
     private boolean p2pGroupActive;
     private java.net.InetAddress lastP2pOwnerAddress;
     private int p2pClientRetries;
+    private boolean lanExclusiveMode;
+    private boolean lanTopologyScheduled;
+    private java.net.InetAddress lastKnownLanIp;
+    private long lastLanReplyMs;
+    private final Set<String> pendingLanConnects = new HashSet<String>();
     private Aware aware;
     private Lan lan;
     private Bt bt;
@@ -169,8 +178,21 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private final Runnable presenceTick = new Runnable() {
         @Override public void run() {
+            onWifiNetworkChanged();
             sendPresence();
             ui.postDelayed(this, PRESENCE_EVERY_MS);
+        }
+    };
+
+    private final Runnable lanTopologyCheck = new Runnable() {
+        @Override public void run() {
+            evaluateLanTopology();
+        }
+    };
+
+    private final Runnable lanExitGraceCheck = new Runnable() {
+        @Override public void run() {
+            syncTransportMode(true);
         }
     };
 
@@ -263,6 +285,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             }
         }).onSidelink(new Aware.SidelinkListener() {
             @Override public void onSidelink(final Aware.SidelinkPacket packet) {
+                if (lanExclusiveMode) return;
                 if (packet != null && packet.type == Aware.SIDELINK_AUDIO) {
                     if (!packet.sender.equals(myName) && !Hub.isPassiveRelayName(packet.sender)) {
                         Hub h = hub;
@@ -305,7 +328,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void onL2capReady(final int psm) {
                 ui.post(new Runnable() {
                     @Override public void run() {
-                        if (ble != null && neededPermissions().length == 0) {
+                        if (!lanExclusiveMode && ble != null && neededPermissions().length == 0) {
                             ble.updateAdvertise(myName, buildPresence(), activeGroupOwner(),
                                     psm, activeClusterId());
                         }
@@ -326,28 +349,35 @@ public class MainActivity extends Activity implements Hub.Callback {
             }
         });
 
+        lastKnownLanIp = Lan.localWifiIPv4();
         p2p = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
         if (p2p == null) {
             setStatus("HP ini tidak mendukung Wi‑Fi Direct", DANGER);
         } else {
             channel = p2p.initialize(this, getMainLooper(), null);
-            receiver = new BroadcastReceiver() {
-                @Override public void onReceive(Context c, Intent i) { onP2pEvent(i); }
-            };
-            IntentFilter f = new IntentFilter();
+        }
+        receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent i) { onNetworkOrP2pEvent(i); }
+        };
+        IntentFilter f = new IntentFilter();
+        f.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+        f.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
+        f.addAction(ACTION_WIFI_AP_STATE_CHANGED);
+        f.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+        if (p2p != null) {
             f.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
             f.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
             f.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
-            if (Build.VERSION.SDK_INT >= 33) {
-                try {
-                    Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
-                            .invoke(this, receiver, f, 4 /* RECEIVER_NOT_EXPORTED */);
-                } catch (Exception e) {
-                    registerReceiver(receiver, f);
-                }
-            } else {
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                Context.class.getMethod("registerReceiver", BroadcastReceiver.class, IntentFilter.class, int.class)
+                        .invoke(this, receiver, f, 4 /* RECEIVER_NOT_EXPORTED */);
+            } catch (Exception e) {
                 registerReceiver(receiver, f);
             }
+        } else {
+            registerReceiver(receiver, f);
         }
 
         addSystemMessage("Komunikasi lapangan tanpa internet & sinyal. Nyalakan Wi‑Fi dan Lokasi di setiap HP Tim, "
@@ -376,6 +406,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     @Override protected void onResume() {
         super.onResume();
         visible = true;
+        onWifiNetworkChanged();
         updateKeepAlive();
     }
 
@@ -420,6 +451,8 @@ public class MainActivity extends Activity implements Hub.Callback {
         stopAlarm();
         apkShare.stop();
         ui.removeCallbacks(presenceTick);
+        ui.removeCallbacks(lanTopologyCheck);
+        ui.removeCallbacks(lanExitGraceCheck);
         if (locations != null && locationListener != null) locations.removeUpdates(locationListener);
         if (receiver != null) unregisterReceiver(receiver);
         if (aware != null) aware.stop();
@@ -896,21 +929,36 @@ public class MainActivity extends Activity implements Hub.Callback {
         statusDot.setBackground(oval(color));
     }
 
+    private boolean hasUsableLanPeer(String peerName) {
+        if (peerName == null) return false;
+        Lan.Peer lp = lanPeers.get(peerName);
+        if (lp == null) return false;
+        long now = System.currentTimeMillis();
+        if (lp.seenAtMs > 0 && now - lp.seenAtMs > MeshCoordinator.LAN_PEER_TTL_MS) return false;
+        return !coordinator.isLanIsolated(lp.name, lp.address);
+    }
+
     private void refreshPeers() {
         peerList.removeAllViews();
-        boolean any = !awarePeers.isEmpty() || !lanPeers.isEmpty() || !peers.isEmpty() || !btPeers.isEmpty();
+        boolean any = !lanPeers.isEmpty()
+                || (!lanExclusiveMode && (!awarePeers.isEmpty() || !peers.isEmpty() || !btPeers.isEmpty()));
         emptyPeers.setVisibility(any ? View.GONE : View.VISIBLE);
-        for (final Aware.Peer ap : awarePeers.values()) {
-            addPeerRow(ap.name, "Wi‑Fi Aware · Koneksi otomatis cepat", new View.OnClickListener() {
-                @Override public void onClick(View v) { connectAware(ap); }
+        for (final Lan.Peer lp : lanPeers.values()) {
+            boolean isolated = coordinator.isLanIsolated(lp.name, lp.address);
+            String sub = isolated
+                    ? "Hotspot/Wi‑Fi Lokal · Isolasi router (dialihkan ke Mesh)"
+                    : (lp.inGroup
+                        ? "Hotspot/Wi‑Fi Lokal · Prioritas #1 · Grup aktif"
+                        : "Hotspot/Wi‑Fi Lokal · Prioritas #1 · Siap terhubung");
+            addPeerRow(lp.name, sub, new View.OnClickListener() {
+                @Override public void onClick(View v) { connectLan(lp); }
             });
         }
-        for (final Lan.Peer lp : lanPeers.values()) {
-            if (awarePeers.containsKey(lp.name)) continue;
-            addPeerRow(lp.name, lp.inGroup
-                    ? "Hotspot/Wi‑Fi Lokal · Grup aktif"
-                    : "Hotspot/Wi‑Fi Lokal · Siap terhubung", new View.OnClickListener() {
-                @Override public void onClick(View v) { connectLan(lp); }
+        if (lanExclusiveMode) return;
+        for (final Aware.Peer ap : awarePeers.values()) {
+            if (hasUsableLanPeer(ap.name)) continue;
+            addPeerRow(ap.name, "Wi‑Fi Aware · Koneksi otomatis cepat", new View.OnClickListener() {
+                @Override public void onClick(View v) { connectAware(ap); }
             });
         }
         for (final WifiP2pDevice d : peers) {
@@ -922,7 +970,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         for (Map.Entry<String, android.bluetooth.BluetoothDevice> e : btPeers.entrySet()) {
             final android.bluetooth.BluetoothDevice dev = e.getValue();
             final String n = btNames.get(e.getKey());
-            if (n == null || awarePeers.containsKey(n) || lanPeers.containsKey(n)) continue;
+            if (n == null || awarePeers.containsKey(n) || hasUsableLanPeer(n)) continue;
             final Integer psmObj = btPsms.get(e.getKey());
             final int psm = psmObj != null ? psmObj : 0;
             addPeerRow(n, "Bluetooth Mesh · Growth Internal", new View.OnClickListener() {
@@ -1564,16 +1612,18 @@ public class MainActivity extends Activity implements Hub.Callback {
         boolean ownerActive = activeGroupOwner();
         int count = groupMemberCount();
         int cid = activeClusterId();
-        if (ble != null && neededPermissions().length == 0) {
-            ble.updateAdvertise(myName, p, ownerActive, bt != null ? bt.l2capPsm() : 0, cid);
-            if (p.status == Presence.SOS) {
-                ble.broadcastMeshPresence(myName, p);
+        if (!lanExclusiveMode) {
+            if (ble != null && neededPermissions().length == 0) {
+                ble.updateAdvertise(myName, p, ownerActive, bt != null ? bt.l2capPsm() : 0, cid);
+                if (p.status == Presence.SOS) {
+                    ble.broadcastMeshPresence(myName, p);
+                }
             }
-        }
-        if (aware != null && neededPermissions().length == 0) {
-            aware.updatePublish(myName, port, ownerActive, count, cid);
-            if (p.status == Presence.SOS) {
-                aware.broadcastSidelinkPresence(myName, p.encode());
+            if (aware != null && neededPermissions().length == 0) {
+                aware.updatePublish(myName, port, ownerActive, count, cid);
+                if (p.status == Presence.SOS) {
+                    aware.broadcastSidelinkPresence(myName, p.encode());
+                }
             }
         }
         if (lan != null) {
@@ -1713,8 +1763,10 @@ public class MainActivity extends Activity implements Hub.Callback {
                         if (t.length() == 0 || hub == null) return;
                         if (t.length() > 1000) t = t.substring(0, 1000);
                         hub.sendAnnouncement(t);
-                        if (ble != null) ble.broadcastMeshAnnounce(myName, t);
-                        if (aware != null) aware.broadcastSidelinkAnnounce(myName, t);
+                        if (!lanExclusiveMode) {
+                            if (ble != null) ble.broadcastMeshAnnounce(myName, t);
+                            if (aware != null) aware.broadcastSidelinkAnnounce(myName, t);
+                        }
                         addAnnouncement("Kamu", t);
                     }
                 })
@@ -2404,13 +2456,18 @@ public class MainActivity extends Activity implements Hub.Callback {
                 .putString("photo", photo == null ? null : Base64.encodeToString(photo, Base64.NO_WRAP))
                 .apply();
         int cid = activeClusterId();
-        if (ble != null && neededPermissions().length == 0) {
-            ble.updateAdvertise(myName, buildPresence(), activeGroupOwner(),
-                    bt != null ? bt.l2capPsm() : 0, cid);
+        int port = hub != null ? hub.port() : Hub.PORT;
+        if (!lanExclusiveMode) {
+            if (ble != null && neededPermissions().length == 0) {
+                ble.updateAdvertise(myName, buildPresence(), activeGroupOwner(),
+                        bt != null ? bt.l2capPsm() : 0, cid);
+            }
+            if (aware != null && neededPermissions().length == 0) {
+                aware.updatePublish(myName, port, activeGroupOwner(), groupMemberCount(), cid);
+            }
         }
-        if (aware != null && neededPermissions().length == 0) {
-            aware.updatePublish(myName, hub != null ? hub.port() : Hub.PORT,
-                    activeGroupOwner(), groupMemberCount(), cid);
+        if (lan != null) {
+            lan.announce(myName, port, activeGroupOwner(), groupMemberCount(), cid);
         }
         refreshAll();
         updateKeepAlive();
@@ -2508,13 +2565,15 @@ public class MainActivity extends Activity implements Hub.Callback {
         boolean ownerActive = activeGroupOwner();
         int count = groupMemberCount();
         int cid = activeClusterId();
-        if (bt != null) bt.startServer();
-        if (ble != null) {
-            ble.startScan();
-            ble.updateAdvertise(myName, buildPresence(), ownerActive, bt != null ? bt.l2capPsm() : 0, cid);
-        }
-        if (aware != null) {
-            aware.start(myName, port, ownerActive, count, cid);
+        if (!lanExclusiveMode) {
+            if (bt != null) bt.startServer();
+            if (ble != null) {
+                ble.startScan();
+                ble.updateAdvertise(myName, buildPresence(), ownerActive, bt != null ? bt.l2capPsm() : 0, cid);
+            }
+            if (aware != null) {
+                aware.start(myName, port, ownerActive, count, cid);
+            }
         }
         if (lan != null) {
             lan.announce(myName, port, ownerActive, count, cid);
@@ -2549,9 +2608,15 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private Hub ensureActiveHub() {
-        if (hub != null) return hub;
+        if (hub != null) {
+            if (!isOwner) {
+                isOwner = true;
+                hub.ensureLanServer();
+            }
+            return hub;
+        }
         Hub h = initHub(true);
-        h.startServer(null);
+        h.ensureLanServer();
         refreshAll();
         return h;
     }
@@ -2582,7 +2647,9 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onAwarePeer(Aware.Peer peer) {
-        if (peer == null || peer.name.equals(myName)) return;
+        if (lanExclusiveMode || peer == null || peer.name.equals(myName) || hasUsableLanPeer(peer.name)) {
+            return;
+        }
         awarePeers.put(peer.name, peer);
         refreshPeers();
         if (hub == null) {
@@ -2619,30 +2686,228 @@ public class MainActivity extends Activity implements Hub.Callback {
         aware.connect(peer);
     }
 
+    private int usableLanPeerCount(long nowMs) {
+        int count = 0;
+        Iterator<Map.Entry<String, Lan.Peer>> it = lanPeers.entrySet().iterator();
+        while (it.hasNext()) {
+            Lan.Peer p = it.next().getValue();
+            if (p == null || (p.seenAtMs > 0 && nowMs - p.seenAtMs > MeshCoordinator.LAN_PEER_TTL_MS)) {
+                it.remove();
+                continue;
+            }
+            if (!coordinator.isLanIsolated(p.name, p.address)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void clearPendingLanConnect(String peerName) {
+        if (peerName == null) return;
+        String prefix = peerName + "@";
+        Iterator<String> it = pendingLanConnects.iterator();
+        while (it.hasNext()) {
+            if (it.next().startsWith(prefix)) it.remove();
+        }
+    }
+
+    private void scheduleLanTopologyCheck(long delayMs) {
+        if (lanTopologyScheduled) return;
+        lanTopologyScheduled = true;
+        ui.postDelayed(lanTopologyCheck, delayMs);
+    }
+
+    private void syncTransportMode(boolean immediateExit) {
+        long now = System.currentTimeMillis();
+        java.net.InetAddress wifiIp = Lan.localWifiIPv4();
+        boolean hasActiveLan = hub != null && hub.hasActiveLanPeer();
+        int usablePeers = usableLanPeerCount(now);
+        boolean hasWifi = wifiIp != null || hasActiveLan;
+        boolean wantExclusive = MeshCoordinator.shouldDisableNonLanTransports(
+                hasWifi, hasActiveLan, usablePeers);
+        if (wantExclusive) {
+            ui.removeCallbacks(lanExitGraceCheck);
+            if (!lanExclusiveMode) {
+                lanExclusiveMode = true;
+                if (aware != null) aware.stop();
+                if (ble != null) ble.stop();
+                if (bt != null) bt.stop();
+                coordinator.stopRelayHub();
+                awarePeers.clear();
+                btPeers.clear();
+                btNames.clear();
+                btPsms.clear();
+                peers.clear();
+                if (p2p != null && channel != null) {
+                    p2p.stopPeerDiscovery(channel, null);
+                    p2p.cancelConnect(channel, null);
+                }
+                refreshPeers();
+            }
+            if (hasActiveLan && hub != null) {
+                hub.closeNonLanLinks();
+                if (p2pGroupActive && p2p != null && channel != null) {
+                    p2pGroupActive = false;
+                    lastP2pOwnerAddress = null;
+                    p2p.removeGroup(channel, null);
+                }
+            }
+        } else if (lanExclusiveMode) {
+            if (!immediateExit && hasWifi && lanPeers.isEmpty()) {
+                ui.removeCallbacks(lanExitGraceCheck);
+                ui.postDelayed(lanExitGraceCheck, 600L);
+                return;
+            }
+            ui.removeCallbacks(lanExitGraceCheck);
+            ui.removeCallbacks(lanTopologyCheck);
+            lanTopologyScheduled = false;
+            lanExclusiveMode = false;
+            pendingLanConnects.clear();
+            if (hub != null && !hub.hasPeers() && members.isEmpty() && !p2pGroupActive) {
+                stopHub();
+                refreshAll();
+            }
+            if (neededPermissions().length == 0) {
+                startOfflineTransports();
+                if (p2p != null && channel != null) {
+                    p2p.discoverPeers(channel, null);
+                }
+            }
+            refreshPeers();
+        }
+    }
+
+    private boolean isSmallestInMyGroup() {
+        if (myName == null) return false;
+        for (String m : members.keySet()) {
+            if (m != null && !Hub.isPassiveRelayName(m) && m.compareTo(myName) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void onLanPeer(Lan.Peer peer) {
-        if (peer == null || peer.name.equals(myName)) return;
-        lanPeers.put(peer.name, peer);
+        if (peer == null || peer.name.equals(myName) || Hub.isPassiveRelayName(peer.name)) return;
+        long now = System.currentTimeMillis();
+        Lan.Peer prev = lanPeers.put(peer.name, peer);
+        boolean ipChanged = prev != null && prev.address != null && peer.address != null
+                && !prev.address.equals(peer.address);
+        if (ipChanged) {
+            coordinator.clearLanIsolation(peer.name);
+        }
+        boolean stateChanged = prev == null || ipChanged
+                || prev.inGroup != peer.inGroup
+                || prev.memberCount != peer.memberCount
+                || prev.clusterId != peer.clusterId
+                || prev.hotspotHost != peer.hotspotHost;
+        if (lan != null && (prev == null || (stateChanged && now - lastLanReplyMs >= 1500L))) {
+            lastLanReplyMs = now;
+            lan.announce(myName, hub != null ? hub.port() : Hub.PORT,
+                    activeGroupOwner(), groupMemberCount(), activeClusterId());
+        }
+        syncTransportMode(false);
         refreshPeers();
         if (hub == null) {
             setStatus(totalDiscoveredPeers() + " perangkat ditemukan", AMBER);
         }
-        boolean upgradeFromBle = hub != null && hub.hasMember(peer.name) && hub.hasLowBandwidthLink(peer.name);
-        if (hub != null && hub.hasMember(peer.name) && !upgradeFromBle) return;
-        if (awarePeers.containsKey(peer.name)) return;
-        if (activeGroupOwner() && !peer.inGroup && !upgradeFromBle && lan != null) {
-            lan.announce(myName, hub.port(), true, groupMemberCount(), activeClusterId());
+        if (coordinator.isLanIsolated(peer.name, peer.address)) return;
+        long delayMs = (peer.inGroup && peer.memberCount > 1) || (hub != null && hub.hasPeers())
+                ? 80L : 280L;
+        scheduleLanTopologyCheck(delayMs);
+    }
+
+    private void evaluateLanTopology() {
+        lanTopologyScheduled = false;
+        long now = System.currentTimeMillis();
+        boolean meHotspot = Lan.isHostingHotspot();
+        String prelimOwner = coordinator.selectLanOwner(myName, activeGroupOwner(),
+                groupMemberCount(), activeClusterId(), meHotspot,
+                lanPeers.values(), now);
+        if (myName != null && myName.equals(prelimOwner)) {
+            boolean newlyIsolated = false;
+            for (Lan.Peer p : lanPeers.values()) {
+                if (p == null || coordinator.isLanIsolated(p.name, p.address)) continue;
+                boolean connectedOnLan = hub != null && hub.hasLanLinkTo(p.name);
+                if (coordinator.checkOwnerSideLanIsolation(p.name, p.address, connectedOnLan, now)) {
+                    newlyIsolated = true;
+                }
+            }
+            if (newlyIsolated) {
+                syncTransportMode(true);
+            }
+        }
+        syncTransportMode(false);
+        if (!lanExclusiveMode || coordinator.isPaused()) return;
+
+        String ownerName = coordinator.selectLanOwner(myName, activeGroupOwner(),
+                groupMemberCount(), activeClusterId(), meHotspot,
+                lanPeers.values(), now);
+        if (ownerName == null) return;
+
+        if (ownerName.equals(myName)) {
+            boolean wasNull = (hub == null);
+            ensureActiveHub();
+            if (wasNull) sendPresence();
+            boolean waitingForUnconnected = false;
+            for (Lan.Peer p : lanPeers.values()) {
+                if (p != null && !coordinator.isLanIsolated(p.name, p.address)
+                        && (hub == null || !hub.hasLanLinkTo(p.name))) {
+                    coordinator.checkOwnerSideLanIsolation(p.name, p.address, false, now);
+                    waitingForUnconnected = true;
+                }
+            }
+            if (waitingForUnconnected) {
+                scheduleLanTopologyCheck(2500L);
+            }
             return;
         }
-        int action = upgradeFromBle ? 1 : autoConnectDecision(hub != null && hub.hasPeers(),
-                groupMemberCount(), myName, activeClusterId(), peer.inGroup, peer.memberCount,
-                peer.name, peer.clusterId);
-        if ((action == 1 && canAutoConnect("lan:" + peer.name, peer.name))
-                || (action == 2 && canAutoConnect("lan-own:" + peer.name, peer.name))) {
-            connectLan(peer);
-        }
+
+        Lan.Peer target = lanPeers.get(ownerName);
+        if (target == null || coordinator.isLanIsolated(target.name, target.address)) return;
+
+        int myCid = activeClusterId();
+        boolean alreadyOnLanWithOwner = hub != null
+                && (hub.hasLanLinkTo(target.name)
+                    || (myCid != 0 && myCid == target.clusterId && hub.hasActiveLanPeer()));
+        if (alreadyOnLanWithOwner) return;
+
+        boolean inMultiMemberLanGroup = hub != null && hub.hasActiveLanPeer() && !members.isEmpty();
+        if (inMultiMemberLanGroup && !isSmallestInMyGroup()) return;
+
+        connectLanToOwner(target);
+    }
+
+    private void connectLanToOwner(final Lan.Peer target) {
+        if (target == null || target.address == null) return;
+        final String key = MeshCoordinator.lanPeerKey(target.name, target.address);
+        if (pendingLanConnects.contains(key)) return;
+        if (!canAutoConnect("lan:" + target.name, target.name)) return;
+        pendingLanConnects.add(key);
+        final Hub h = ensureActiveHub();
+        setStatus("Menyambung ke " + target.name + " (Hotspot/Wi‑Fi Lokal)…", AMBER);
+        h.connectPeer(target.address, target.port, new Runnable() {
+            @Override public void run() {
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        pendingLanConnects.remove(key);
+                        if (h != hub || hub == null) return;
+                        if (!hub.hasLanLinkTo(target.name)) {
+                            coordinator.markLanIsolated(target.name, target.address);
+                            syncTransportMode(true);
+                            scheduleLanTopologyCheck(150L);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     private void onBtIncoming(final android.bluetooth.BluetoothSocket socket) {
+        if (lanExclusiveMode) {
+            try { if (socket != null) socket.close(); } catch (java.io.IOException ignored) {}
+            return;
+        }
         final boolean passive = coordinator.isPaused();
         final Hub h = passive ? ensureRelayHub() : ensureActiveHub();
         if (!passive) sendPresence();
@@ -2659,6 +2924,10 @@ public class MainActivity extends Activity implements Hub.Callback {
 
     private void onMeshAccessTunnel(final MeshAccess.Pipe pipe, final byte tunnelType, final int fmKeyId) {
         if (pipe == null) return;
+        if (lanExclusiveMode) {
+            try { pipe.close(); } catch (java.io.IOException ignored) {}
+            return;
+        }
         final boolean passive = fmKeyId == MeshAccess.FM_KEY_ZERO || coordinator.isPaused();
         final Hub h = passive ? ensureRelayHub() : ensureActiveHub();
         if (!passive) sendPresence();
@@ -2674,7 +2943,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onBleBeacon(Ble.Beacon beacon, android.bluetooth.BluetoothDevice device) {
-        if (beacon == null || beacon.name.equals(myName)) return;
+        if (lanExclusiveMode || beacon == null || beacon.name.equals(myName)) return;
         if (device != null && device.getAddress() != null) {
             btPeers.put(device.getAddress(), device);
             btNames.put(device.getAddress(), beacon.name);
@@ -2690,7 +2959,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 && coordinator.shouldHandoverToBle(beacon.name);
         boolean unjoined = !sameCluster
                 && !awarePeers.containsKey(beacon.name)
-                && !lanPeers.containsKey(beacon.name)
+                && !hasUsableLanPeer(beacon.name)
                 && (hub == null || !hub.hasMember(beacon.name));
         if (device != null && qualityOk && (unjoined || makeBeforeBreak)) {
             boolean preferConnect = beacon.inGroup || myName.compareTo(beacon.name) > 0
@@ -2702,7 +2971,10 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onAwareSidelink(Aware.SidelinkPacket pkt) {
-        if (pkt == null || pkt.sender.equals(myName) || Hub.isPassiveRelayName(pkt.sender)) return;
+        if (lanExclusiveMode || pkt == null || pkt.sender.equals(myName)
+                || Hub.isPassiveRelayName(pkt.sender)) {
+            return;
+        }
         if (pkt.type == Aware.SIDELINK_TALK) {
             if (hub != null && hub.hasMember(pkt.sender)) return;
             boolean talking = pkt.body != null && pkt.body.length > 0 && pkt.body[0] != 0;
@@ -2739,7 +3011,7 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private void onBleMesh(Ble.MeshPacket pkt) {
-        if (pkt == null || pkt.sender.equals(myName)) return;
+        if (lanExclusiveMode || pkt == null || pkt.sender.equals(myName)) return;
         if (pkt.type == Ble.MESH_PRESENCE) {
             Presence p = Ble.unpackMeshPresence(pkt.body);
             if (p != null) {
@@ -2807,11 +3079,13 @@ public class MainActivity extends Activity implements Hub.Callback {
     private void connectLan(Lan.Peer peer) {
         if (peer == null || !ensurePermissions()) return;
         coordinator.clearPause();
-        Hub h = ensureActiveHub();
-        if (peer.inGroup || myName.compareTo(peer.name) > 0) {
-            setStatus("Menyambung ke " + peer.name + " (Hotspot/Wi‑Fi Lokal)…", AMBER);
-            h.connectPeer(peer.address, peer.port, null);
-        } else {
+        coordinator.clearLanIsolation(peer.name);
+        coordinator.clearPeerCooldown(peer.name);
+        clearPendingLanConnect(peer.name);
+        syncTransportMode(false);
+        evaluateLanTopology();
+        if (hub != null && !pendingLanConnects.contains(MeshCoordinator.lanPeerKey(peer.name, peer.address))
+                && !hub.hasLanLinkTo(peer.name)) {
             setStatus("Menunggu " + peer.name + " bergabung (Hotspot/Wi‑Fi Lokal)", AMBER);
             sendPresence();
         }
@@ -2839,19 +3113,29 @@ public class MainActivity extends Activity implements Hub.Callback {
     }
 
     private int totalDiscoveredPeers() {
-        return awarePeers.size() + lanPeers.size() + peers.size() + btPeers.size();
+        return lanExclusiveMode
+                ? lanPeers.size()
+                : (awarePeers.size() + lanPeers.size() + peers.size() + btPeers.size());
     }
 
     // ------------------------------------------------------ Wi-Fi Direct
 
     private void discover() {
         coordinator.resetCooldowns();
+        pendingLanConnects.clear();
         discover(0);
     }
 
     private void discover(final int attempt) {
         if (!ensurePermissions()) return;
+        onWifiNetworkChanged();
+        syncTransportMode(false);
         startOfflineTransports();
+        if (lanExclusiveMode) {
+            setStatus("Prioritas Hotspot/Wi‑Fi Lokal aktif · Menyambungkan Tim…", AMBER);
+            scheduleLanTopologyCheck(50L);
+            return;
+        }
         if (p2p == null) {
             setStatus("Mencari perangkat via Wi‑Fi Aware, Hotspot & Bluetooth Mesh", AMBER);
             return;
@@ -2924,16 +3208,63 @@ public class MainActivity extends Activity implements Hub.Callback {
         p2pGroupActive = false;
         lastP2pOwnerAddress = null;
         p2pClientRetries = 0;
+        pendingLanConnects.clear();
         stopHub();
         stopBridge();
         upstreamInfo = null;
+        syncTransportMode(true);
         refreshAll();
         sendPresence();
-        if (p2p != null) {
+        if (p2p != null && channel != null) {
             p2p.cancelConnect(channel, null);
             p2p.removeGroup(channel, null);
         }
         addSystemMessage("Kamu keluar dari grup.");
+    }
+
+    private void onNetworkOrP2pEvent(Intent i) {
+        if (i == null) return;
+        String action = i.getAction();
+        if (WifiManager.NETWORK_STATE_CHANGED_ACTION.equals(action)
+                || WifiManager.WIFI_STATE_CHANGED_ACTION.equals(action)
+                || ACTION_WIFI_AP_STATE_CHANGED.equals(action)
+                || ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
+            onWifiNetworkChanged();
+        } else if (p2p != null) {
+            onP2pEvent(i);
+        }
+    }
+
+    private void onWifiNetworkChanged() {
+        java.net.InetAddress curIp = Lan.localWifiIPv4();
+        if (curIp == null) {
+            boolean hadLanState = lastKnownLanIp != null || lanExclusiveMode || !lanPeers.isEmpty()
+                    || (hub != null && hub.hasActiveLanPeer());
+            lastKnownLanIp = null;
+            if (!hadLanState) return;
+            lanPeers.clear();
+            pendingLanConnects.clear();
+            coordinator.clearAllLanState();
+            ui.removeCallbacks(lanTopologyCheck);
+            ui.removeCallbacks(lanExitGraceCheck);
+            lanTopologyScheduled = false;
+            if (hub != null) hub.closeLanLinks();
+            syncTransportMode(true);
+            refreshPeers();
+            return;
+        }
+        if (!curIp.equals(lastKnownLanIp)) {
+            lastKnownLanIp = curIp;
+            lanPeers.clear();
+            pendingLanConnects.clear();
+            coordinator.clearAllLanState();
+            if (lan != null) {
+                lan.announce(myName, hub != null ? hub.port() : Hub.PORT,
+                        activeGroupOwner(), groupMemberCount(), activeClusterId());
+            }
+            syncTransportMode(true);
+            refreshPeers();
+        }
     }
 
     private void onP2pEvent(Intent i) {
@@ -2945,7 +3276,7 @@ public class MainActivity extends Activity implements Hub.Callback {
                 setStatus("Wi‑Fi mati. Nyalakan Wi‑Fi atau Bluetooth (tanpa internet)", DANGER);
             }
         } else if (WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION.equals(action)) {
-            if (neededPermissions().length > 0) return;
+            if (lanExclusiveMode || neededPermissions().length > 0) return;
             p2p.requestPeers(channel, new WifiP2pManager.PeerListListener() {
                 @Override public void onPeersAvailable(WifiP2pDeviceList list) {
                     peers.clear();
@@ -3263,14 +3594,16 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (t.length() == 0 || !ready()) return;
         if (t.length() > 2000) t = t.substring(0, 2000);
         hub.sendText(t);
-        if (ble != null) ble.broadcastMeshText(myName, t);
-        if (aware != null) aware.broadcastSidelinkText(myName, t);
+        if (!lanExclusiveMode) {
+            if (ble != null) ble.broadcastMeshText(myName, t);
+            if (aware != null) aware.broadcastSidelinkText(myName, t);
+        }
         addBubble(myName, t, true);
         input.setText("");
     }
 
     private boolean shouldBroadcastSidelinkVoice(Hub h) {
-        if (aware == null) return false;
+        if (lanExclusiveMode || aware == null) return false;
         if (h == null || !h.hasPeers()) return true;
         for (String peerName : awarePeers.keySet()) {
             if (!h.hasMember(peerName)) return true;
@@ -3309,7 +3642,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         if (voice.isCapturing()) {
             voice.stopCapture();
             if (hub != null) hub.sendTalkState(false);
-            if (aware != null) aware.broadcastSidelinkTalk(myName, false);
+            if (!lanExclusiveMode && aware != null) aware.broadcastSidelinkTalk(myName, false);
         }
         syncVoiceCoexistence();
         refreshControls();
@@ -3356,9 +3689,14 @@ public class MainActivity extends Activity implements Hub.Callback {
                 if (hub == null) return;
                 boolean isNew = !members.containsKey(name);
                 p2pClientRetries = 0;
+                clearPendingLanConnect(name);
+                if (hub.hasLanLinkTo(name)) {
+                    coordinator.clearLanIsolation(name);
+                }
                 bleSosNames.remove(name);
                 members.put(name, photo);
-                if (ble != null) ble.setConnectedMode(true);
+                syncTransportMode(false);
+                if (!lanExclusiveMode && ble != null) ble.setConnectedMode(true);
                 refreshMembers();
                 refreshSos();
                 setStatus("Terhubung · " + (members.size() + 1) + " orang", ACCENT);
@@ -3374,6 +3712,7 @@ public class MainActivity extends Activity implements Hub.Callback {
             @Override public void run() {
                 if (hub == null) return;
                 coordinator.clearPeerCooldown(name);
+                clearPendingLanConnect(name);
                 members.remove(name);
                 awarePeers.remove(name);
                 lanPeers.remove(name);
@@ -3381,7 +3720,13 @@ public class MainActivity extends Activity implements Hub.Callback {
                 presences.remove(name);
                 voice.drop(name);
                 syncVoiceCoexistence();
-                if (ble != null) ble.setConnectedMode(!members.isEmpty());
+                sendPresence();
+                syncTransportMode(false);
+                if (lanExclusiveMode) {
+                    scheduleLanTopologyCheck(300L);
+                } else if (ble != null) {
+                    ble.setConnectedMode(!members.isEmpty());
+                }
                 refreshCompass();
                 refreshMembers();
                 refreshTalkers();
@@ -3389,7 +3734,6 @@ public class MainActivity extends Activity implements Hub.Callback {
                 alertLost(name + " terputus dari grup");
                 notifyAway(Alerts.CH_MESSAGES, name + " terputus dari grup",
                         "Mungkin keluar jangkauan atau baterai habis.");
-                sendPresence();
                 updateKeepAlive();
                 if (members.isEmpty()) setStatus("Tidak ada anggota tersambung", DANGER);
                 else setStatus("Terhubung · " + (members.size() + 1) + " orang", ACCENT);
@@ -3458,7 +3802,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 if (!shouldAcceptMeshText(from, text)) return;
-                if (ble != null) ble.broadcastMeshText(from, text);
+                if (!lanExclusiveMode && ble != null) ble.broadcastMeshText(from, text);
                 addBubble(from, text, false);
                 notifyAway(Alerts.CH_MESSAGES, from, text);
             }
@@ -3476,13 +3820,13 @@ public class MainActivity extends Activity implements Hub.Callback {
                     if (!members.containsKey(from)) bleSosNames.add(from);
                     if (!wasSos) {
                         sosSilenced.remove(from);
-                        if (ble != null) ble.broadcastMeshPresence(from, p);
+                        if (!lanExclusiveMode && ble != null) ble.broadcastMeshPresence(from, p);
                         addSystemMessage(from + " mengirim Panggilan Prioritas");
                         notifyAway(Alerts.CH_SOS, "PRIORITAS: " + from + " butuh supporting/backup!", whereIs(p));
                     }
                 } else if (wasSos) {
                     bleSosNames.remove(from);
-                    if (ble != null) ble.broadcastMeshPresence(from, p);
+                    if (!lanExclusiveMode && ble != null) ble.broadcastMeshPresence(from, p);
                     addSystemMessage(from + " mengakhiri Panggilan Prioritas");
                 }
                 refreshMembers();
@@ -3496,7 +3840,7 @@ public class MainActivity extends Activity implements Hub.Callback {
         ui.post(new Runnable() {
             @Override public void run() {
                 if (!shouldAcceptMeshText("ann:" + from, text)) return;
-                if (ble != null) ble.broadcastMeshAnnounce(from, text);
+                if (!lanExclusiveMode && ble != null) ble.broadcastMeshAnnounce(from, text);
                 addAnnouncement(from, text);
                 notifyAway(Alerts.CH_MESSAGES, "Instruksi dari " + from, text);
                 vibrate(new long[] {0, 400});
